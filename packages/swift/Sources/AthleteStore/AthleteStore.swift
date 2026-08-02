@@ -90,6 +90,23 @@ public actor AthleteStore {
         }
     }
 
+    public func hasEvidence(kind: String, derivedFrom evidenceID: UUID) throws -> Bool {
+        try database.read { db in
+            try Bool.fetchOne(
+                db,
+                sql: """
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM evidence_events
+                        JOIN evidence_derivations ON evidence_events.id = evidence_derivations.evidence_id
+                        WHERE evidence_events.kind = ? AND evidence_derivations.source_evidence_id = ?
+                    )
+                    """,
+                arguments: [kind, evidenceID.uuidString]
+            ) ?? false
+        }
+    }
+
     public func payload<Payload: Decodable>(for evidenceID: UUID, as type: Payload.Type) throws -> Payload? {
         try database.read { db in
             guard let data = try Data.fetchOne(

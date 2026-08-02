@@ -27,6 +27,32 @@ func persistsSessionEvidenceFromActivityStream() async throws {
     #expect(session.trackingCoverage == 1)
 }
 
+@Test("Debrief сохраняет только явные user-reported значения")
+func extractsExplicitNarrativeClaims() throws {
+    let narrative = try UserNarrativeBuilder().make(
+        text: "Присед 100 кг на 5, RPE 8.",
+        sessionEvidenceID: UUID()
+    )
+
+    #expect(narrative.claims.map(\.kind) == [.exercise, .loadKilograms, .repetitions, .rpe])
+    #expect(narrative.clarificationQuestion == nil)
+}
+
+@Test("Пустой debrief не создаёт evidence")
+func rejectsEmptyNarrative() {
+    #expect(throws: UserNarrativeError.emptyText) {
+        try UserNarrativeBuilder().make(text: "  \n ", sessionEvidenceID: UUID())
+    }
+}
+
+@Test("Неоднозначный debrief не превращается в подтверждённый факт")
+func leavesAmbiguousNarrativeUnresolved() throws {
+    let narrative = try UserNarrativeBuilder().make(text: "100 на 5", sessionEvidenceID: UUID())
+
+    #expect(narrative.claims.isEmpty)
+    #expect(narrative.clarificationQuestion == "К какому упражнению и весу относились 100 на 5?")
+}
+
 @Test("Activity segmentation выделяет подход с hysteresis")
 func segmentsSetWithHysteresis() throws {
     let segmenter = ActivitySegmenter(configuration: .test)

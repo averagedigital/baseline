@@ -1,4 +1,5 @@
 import AthleteStore
+import AthleteSensors
 import Foundation
 import Observation
 
@@ -143,7 +144,9 @@ final class ChatModel {
         do {
             providers = try await store.providerConfigurations()
             threads = try await store.chatThreads()
-            hasNewSession = try await store.latestEvidence(kind: "activity.session.v1") != nil
+            if let session = try await store.latestEvidence(kind: "activity.session.v1") {
+                hasNewSession = try await !store.hasEvidence(kind: "user.narrative.v1", derivedFrom: session.id)
+            }
             if let first = threads.first {
                 try await openChat(first)
             }
@@ -174,6 +177,7 @@ final class ChatModel {
             errorMessage = "Локальная история недоступна"
             return
         }
+        Task { await recordDebrief(prompt, in: store) }
         guard let provider = selectedProvider else {
             requiresProviderSettings = true
             return
@@ -202,6 +206,21 @@ final class ChatModel {
                 userMessage: userMessage,
                 context: context
             )
+        }
+    }
+
+    private func recordDebrief(_ text: String, in store: AthleteStore) async {
+        do {
+            guard let session = try await store.latestEvidence(kind: "activity.session.v1"),
+                  try await !store.hasEvidence(kind: "user.narrative.v1", derivedFrom: session.id) else {
+                return
+            }
+            let narrative = try UserNarrativeBuilder().make(text: text, sessionEvidenceID: session.id)
+            let envelope = try narrative.envelope()
+            try await store.appendEvidence(envelope, payload: narrative)
+            hasNewSession = false
+        } catch {
+            errorMessage = "Не удалось сохранить разбор тренировки"
         }
     }
 
