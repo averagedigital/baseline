@@ -18,11 +18,15 @@ struct MotionIntensityHistory: Equatable {
 }
 
 struct AppShell: View {
+    @State private var selectedTab: AppTab = .camera
+
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             CameraScreen()
+                .tag(AppTab.camera)
                 .tabItem { Label("Камера", systemImage: "camera.fill") }
             ChatScreen()
+                .tag(AppTab.chat)
                 .tabItem { Label("Чат", systemImage: "bubble.left.and.bubble.right.fill") }
         }
         .tint(BaselineTheme.accent)
@@ -33,6 +37,7 @@ private struct ChatScreen: View {
     @State private var model = ChatModel()
     @State private var showsHistory = false
     @State private var showsSettings = false
+    @State private var providerEditor: ProviderEditor?
 
     private let suggestions = [
         "Разбери последнюю тренировку",
@@ -79,14 +84,7 @@ private struct ChatScreen: View {
                     .accessibilityLabel("История диалогов")
                 }
                 ToolbarItem(placement: .principal) {
-                    VStack(spacing: 1) {
-                        Text("Baseline")
-                            .font(.headline)
-                        Text(model.selectedProvider?.model ?? "Responses API не настроен")
-                            .font(.caption2)
-                            .foregroundStyle(BaselineTheme.secondary)
-                            .lineLimit(1)
-                    }
+                    modelMenu
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: model.newChat) {
@@ -105,9 +103,12 @@ private struct ChatScreen: View {
             .sheet(isPresented: $showsSettings) {
                 ProviderSettingsView(model: model)
             }
+            .sheet(item: $providerEditor) { editor in
+                ProviderEditorView(model: model, editor: editor)
+            }
             .onChange(of: model.requiresProviderSettings) { _, required in
                 guard required else { return }
-                showsSettings = true
+                providerEditor = model.selectedProvider.map { ProviderEditor(configuration: $0) } ?? .newOpenAI
                 model.requiresProviderSettings = false
             }
             .alert("Ошибка", isPresented: errorBinding) {
@@ -116,6 +117,56 @@ private struct ChatScreen: View {
                 Text(model.errorMessage ?? "Неизвестная ошибка")
             }
         }
+    }
+
+    private var modelMenu: some View {
+        Menu {
+            if model.providers.isEmpty {
+                Text("Нет настроенных моделей")
+            } else {
+                Section("Модели") {
+                    ForEach(model.providers) { provider in
+                        Button {
+                            Task { await model.selectProvider(id: provider.id) }
+                        } label: {
+                            Label(
+                                "\(provider.model) · \(provider.name)",
+                                systemImage: provider.isSelected ? "checkmark.circle.fill" : "circle"
+                            )
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button {
+                providerEditor = .newOpenAI
+            } label: {
+                Label("Добавить API", systemImage: "plus.circle")
+            }
+            Button {
+                showsSettings = true
+            } label: {
+                Label("Управление API", systemImage: "slider.horizontal.3")
+            }
+        } label: {
+            VStack(spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(model.selectedProvider?.model ?? "Выбрать модель")
+                        .font(.headline)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(BaselineTheme.muted)
+                }
+                Text(model.selectedProvider.map { "Baseline · \($0.name)" } ?? "Responses API")
+                    .font(.caption2)
+                    .foregroundStyle(BaselineTheme.secondary)
+                    .lineLimit(1)
+            }
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Модель \(model.selectedProvider?.model ?? "не выбрана")")
+        .sensoryFeedback(.selection, trigger: model.selectedProvider?.id)
     }
 
     private var errorBinding: Binding<Bool> {
@@ -160,8 +211,8 @@ private struct ChatScreen: View {
                 }
             }
             if model.selectedProvider == nil {
-                Button("Настроить Responses API") {
-                    showsSettings = true
+                Button("Добавить Responses API") {
+                    providerEditor = .newOpenAI
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(BaselineTheme.accent)

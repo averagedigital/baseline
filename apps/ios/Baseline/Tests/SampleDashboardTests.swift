@@ -159,3 +159,36 @@ func discardsFailedResponse() {
         ResponsesInputMessage(role: .user, content: "Новый вопрос"),
     ])
 }
+
+@Test("История группирует диалоги по времени последней активности")
+func groupsChatHistoryByActivity() {
+    let calendar = Calendar(identifier: .gregorian)
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let threads = [
+        ChatThread(title: "Сегодня", createdAt: now, updatedAt: now),
+        ChatThread(title: "Вчера", createdAt: now, updatedAt: calendar.date(byAdding: .day, value: -1, to: now)!),
+        ChatThread(title: "Неделя", createdAt: now, updatedAt: calendar.date(byAdding: .day, value: -5, to: now)!),
+        ChatThread(title: "Ранее", createdAt: now, updatedAt: calendar.date(byAdding: .day, value: -12, to: now)!),
+    ]
+
+    let sections = ChatHistorySection.group(threads, now: now, calendar: calendar)
+
+    #expect(sections.map(\.title) == ["Сегодня", "Вчера", "Последние 7 дней", "Ранее"])
+    #expect(sections.flatMap(\.threads).map(\.title) == ["Сегодня", "Вчера", "Неделя", "Ранее"])
+}
+
+@Test("Поиск истории учитывает название и последний ответ")
+func filtersChatHistory() {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let thread = ChatThread(
+        title: "Техника приседа",
+        createdAt: now,
+        updatedAt: now,
+        lastMessage: "Колени держатся стабильно",
+        messageCount: 2
+    )
+
+    #expect(ChatHistorySection.filter([thread], query: "приседа") == [thread])
+    #expect(ChatHistorySection.filter([thread], query: "КОЛЕНИ") == [thread])
+    #expect(ChatHistorySection.filter([thread], query: "бег") == [])
+}
