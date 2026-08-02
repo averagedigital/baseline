@@ -19,11 +19,18 @@ public struct AgentResponse: Equatable, Sendable {
     public let text: String
     public let providerID: String
     public let modelID: String
+    public let planProposalMarkdown: String?
 
-    public init(text: String, providerID: String, modelID: String) {
+    public init(
+        text: String,
+        providerID: String,
+        modelID: String,
+        planProposalMarkdown: String? = nil
+    ) {
         self.text = text
         self.providerID = providerID
         self.modelID = modelID
+        self.planProposalMarkdown = planProposalMarkdown
     }
 }
 
