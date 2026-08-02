@@ -50,6 +50,14 @@ private struct ChatScreen: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 24) {
+                        if model.hasNewSession {
+                            Button("Новая тренировка готова к разбору") {
+                                model.draft = "Разбери последнюю тренировку"
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(BaselineTheme.accent)
+                            .accessibilityHint("Подставляет запрос для Coach")
+                        }
                         if model.conversation.messages.isEmpty {
                             emptyState
                         } else {

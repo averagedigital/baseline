@@ -84,6 +84,13 @@ extension AthleteStore {
                 table.column("created_at", .datetime).notNull().indexed()
             }
         }
+        migrator.registerMigration("v3_evidence_payloads") { db in
+            try db.create(table: "evidence_payloads") { table in
+                table.column("evidence_id", .text).primaryKey()
+                    .references("evidence_events", onDelete: .cascade)
+                table.column("payload", .blob).notNull()
+            }
+        }
         return migrator
     }
 

@@ -1,6 +1,31 @@
 import AthleteSensors
+import AthleteStore
 import Foundation
 import Testing
+
+@Test("Поток активности закрывает компактную session evidence в AthleteStore")
+func persistsSessionEvidenceFromActivityStream() async throws {
+    let store = try AthleteStore.inMemory()
+    let interval = DateInterval(
+        start: Date(timeIntervalSince1970: 1_000),
+        duration: 6
+    )
+    let summary = try ActivitySegmenter(configuration: .test).segment([
+        .tracked(duration: 2, velocity: 0.8, movingFraction: 0.7),
+        .tracked(duration: 2, velocity: 0.1, movingFraction: 0.1),
+        .tracked(duration: 2, velocity: 0.8, movingFraction: 0.7),
+    ])
+
+    let session = SessionEvidenceBuilder().make(interval: interval, summary: summary)
+    let envelope = try session.envelope(ingestedAt: interval.end)
+
+    try await store.appendEvidence(envelope, payload: session)
+
+    #expect(try await store.evidence(id: envelope.id) == envelope)
+    #expect(try await store.payload(for: envelope.id, as: SessionEvidence.self) == session)
+    #expect(session.setCount == 2)
+    #expect(session.trackingCoverage == 1)
+}
 
 @Test("Activity segmentation выделяет подход с hysteresis")
 func segmentsSetWithHysteresis() throws {

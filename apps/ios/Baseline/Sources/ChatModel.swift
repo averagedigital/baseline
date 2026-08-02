@@ -107,6 +107,7 @@ final class ChatModel {
     var selectedThreadID: UUID?
     var errorMessage: String?
     var requiresProviderSettings = false
+    var hasNewSession = false
 
     private let store: AthleteStore?
     private let keyStore: APIKeyStore
@@ -142,6 +143,7 @@ final class ChatModel {
         do {
             providers = try await store.providerConfigurations()
             threads = try await store.chatThreads()
+            hasNewSession = try await store.latestEvidence(kind: "activity.session.v1") != nil
             if let first = threads.first {
                 try await openChat(first)
             }

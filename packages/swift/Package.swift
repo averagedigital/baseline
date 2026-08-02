@@ -24,7 +24,7 @@ let package = Package(
         ),
         .testTarget(name: "AthleteCoreTests", dependencies: ["AthleteCore"]),
         .testTarget(name: "AthleteAgentsTests", dependencies: ["AthleteAgents", "AthleteCore"]),
-        .testTarget(name: "AthleteSensorsTests", dependencies: ["AthleteSensors"]),
+        .testTarget(name: "AthleteSensorsTests", dependencies: ["AthleteSensors", "AthleteStore"]),
         .testTarget(
             name: "AthleteStoreTests",
             dependencies: ["AthleteStore", "AthleteCore", .product(name: "GRDB", package: "GRDB.swift")]

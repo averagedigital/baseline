@@ -20,32 +20,47 @@ public actor AthleteStore {
     }
 
     public func appendEvidence(_ envelope: EvidenceEnvelope) throws {
-        let payload = try JSONEncoder().encode(envelope)
         try database.write { db in
+            try Self.insert(envelope, in: db)
+        }
+    }
+
+    public func appendEvidence<Payload: Encodable>(_ envelope: EvidenceEnvelope, payload: Payload) throws {
+        let encodedPayload = try JSONEncoder().encode(payload)
+        try database.write { db in
+            try Self.insert(envelope, in: db)
             try db.execute(
-                sql: """
-                    INSERT INTO evidence_events
-                        (id, module_id, kind, observed_from, observed_to, ingested_at, supersedes, content_digest, payload)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                arguments: [
-                    envelope.id.uuidString,
-                    envelope.moduleID,
-                    envelope.kind,
-                    envelope.observedFrom,
-                    envelope.observedTo,
-                    envelope.ingestedAt,
-                    envelope.supersedes?.uuidString,
-                    envelope.contentDigest,
-                    payload,
-                ]
+                sql: "INSERT INTO evidence_payloads (evidence_id, payload) VALUES (?, ?)",
+                arguments: [envelope.id.uuidString, encodedPayload]
             )
-            for sourceID in envelope.derivedFrom {
-                try db.execute(
-                    sql: "INSERT INTO evidence_derivations (evidence_id, source_evidence_id) VALUES (?, ?)",
-                    arguments: [envelope.id.uuidString, sourceID.uuidString]
-                )
-            }
+        }
+    }
+
+    private static func insert(_ envelope: EvidenceEnvelope, in db: Database) throws {
+        let payload = try JSONEncoder().encode(envelope)
+        try db.execute(
+            sql: """
+                INSERT INTO evidence_events
+                    (id, module_id, kind, observed_from, observed_to, ingested_at, supersedes, content_digest, payload)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            arguments: [
+                envelope.id.uuidString,
+                envelope.moduleID,
+                envelope.kind,
+                envelope.observedFrom,
+                envelope.observedTo,
+                envelope.ingestedAt,
+                envelope.supersedes?.uuidString,
+                envelope.contentDigest,
+                payload,
+            ]
+        )
+        for sourceID in envelope.derivedFrom {
+            try db.execute(
+                sql: "INSERT INTO evidence_derivations (evidence_id, source_evidence_id) VALUES (?, ?)",
+                arguments: [envelope.id.uuidString, sourceID.uuidString]
+            )
         }
     }
 
@@ -59,6 +74,32 @@ public actor AthleteStore {
                 return nil
             }
             return try JSONDecoder().decode(EvidenceEnvelope.self, from: data)
+        }
+    }
+
+    public func latestEvidence(kind: String) throws -> EvidenceEnvelope? {
+        try database.read { db in
+            guard let data = try Data.fetchOne(
+                db,
+                sql: "SELECT payload FROM evidence_events WHERE kind = ? ORDER BY observed_to DESC LIMIT 1",
+                arguments: [kind]
+            ) else {
+                return nil
+            }
+            return try JSONDecoder().decode(EvidenceEnvelope.self, from: data)
+        }
+    }
+
+    public func payload<Payload: Decodable>(for evidenceID: UUID, as type: Payload.Type) throws -> Payload? {
+        try database.read { db in
+            guard let data = try Data.fetchOne(
+                db,
+                sql: "SELECT payload FROM evidence_payloads WHERE evidence_id = ?",
+                arguments: [evidenceID.uuidString]
+            ) else {
+                return nil
+            }
+            return try JSONDecoder().decode(type, from: data)
         }
     }
 

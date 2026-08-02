@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import AthleteSensors
+import AthleteStore
 import Observation
 import SwiftUI
 
@@ -14,13 +15,28 @@ final class CameraModel {
     var intensity = MotionIntensityHistory(limit: 90)
 
     let pipeline: CameraPipeline
+    private let store: AthleteStore?
     private var previousSamples: [PoseJoint: NormalizedPosePoint] = [:]
+    private var sessionStartedAt: Date?
+    private var lastFrameAt: Date?
+    private var activityWindows: [ActivityWindow] = []
 
-    init(pipeline: CameraPipeline = CameraPipeline()) {
+    init(pipeline: CameraPipeline = CameraPipeline(), store: AthleteStore? = nil) {
         self.pipeline = pipeline
+        if let store {
+            self.store = store
+        } else {
+            do {
+                self.store = try Self.openStore()
+            } catch {
+                self.store = nil
+                errorMessage = "Не удалось открыть локальное хранилище"
+            }
+        }
         pipeline.onFrame = { [weak self] frame in
             Task { @MainActor in
-                self?.recordIntensity(frame.samples)
+                let intensity = self?.recordIntensity(frame.samples) ?? 0
+                self?.recordActivity(frame, intensity: intensity)
                 self?.samples = frame.samples
                 self?.trackingState = frame.trackingState
             }
@@ -32,15 +48,32 @@ final class CameraModel {
         }
     }
 
-    private func recordIntensity(_ samples: [PoseSample]) {
+    private func recordIntensity(_ samples: [PoseSample]) -> Double {
         let current = Dictionary(uniqueKeysWithValues: samples.map { ($0.joint, $0.point) })
         let distances = current.compactMap { joint, point -> Double? in
             guard let previous = previousSamples[joint] else { return nil }
             return hypot(point.x - previous.x, point.y - previous.y)
         }
         let average = distances.isEmpty ? 0 : distances.reduce(0, +) / Double(distances.count)
-        intensity.append(average * 8)
+        let value = min(average * 8, 1)
+        intensity.append(value)
         previousSamples = current
+        return value
+    }
+
+    private func recordActivity(_ frame: PoseFrame, intensity: Double) {
+        let now = Date()
+        defer { lastFrameAt = now }
+        guard let lastFrameAt else { return }
+        let duration = now.timeIntervalSince(lastFrameAt)
+        guard duration > 0 else { return }
+        activityWindows.append(ActivityWindow(
+            duration: duration,
+            normalizedJointVelocity: intensity,
+            movingJointFraction: intensity,
+            boundingBoxMotion: 0,
+            trackingAvailable: frame.trackingState == .stable || frame.trackingState == .degraded
+        ))
     }
 
     func start() async {
@@ -62,6 +95,9 @@ final class CameraModel {
         do {
             try await pipeline.start()
             isRunning = true
+            sessionStartedAt = Date()
+            lastFrameAt = nil
+            activityWindows = []
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -70,9 +106,28 @@ final class CameraModel {
 
     func stop() {
         pipeline.stop()
+        closeSessionIfNeeded()
         isRunning = false
         samples = []
         trackingState = .lost
+    }
+
+    private func closeSessionIfNeeded() {
+        guard let sessionStartedAt, let store, !activityWindows.isEmpty else { return }
+        self.sessionStartedAt = nil
+        let interval = DateInterval(start: sessionStartedAt, end: Date())
+        let windows = activityWindows
+        activityWindows = []
+        Task {
+            do {
+                let summary = try ActivitySegmenter(configuration: .camera).segment(windows)
+                let session = SessionEvidenceBuilder().make(interval: interval, summary: summary)
+                let envelope = try session.envelope(ingestedAt: interval.end)
+                try await store.appendEvidence(envelope, payload: session)
+            } catch {
+                errorMessage = "Не удалось сохранить тренировку"
+            }
+        }
     }
 
     func switchCamera() async {
@@ -86,10 +141,26 @@ final class CameraModel {
             errorMessage = error.localizedDescription
         }
     }
+
+    private static func openStore() throws -> AthleteStore {
+        let manager = FileManager.default
+        let root = try manager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ).appending(path: "Baseline", directoryHint: .isDirectory)
+        try manager.createDirectory(at: root, withIntermediateDirectories: true)
+        return try AthleteStore(path: root.appending(path: "baseline.sqlite").path)
+    }
 }
 
 struct CameraScreen: View {
-    @State private var model = CameraModel()
+    @State private var model: CameraModel
+
+    init(store: AthleteStore? = nil) {
+        _model = State(initialValue: CameraModel(store: store))
+    }
 
     var body: some View {
         ZStack {
@@ -193,6 +264,20 @@ struct CameraScreen: View {
         case .lost: .clear
         }
     }
+}
+
+private extension ActivitySegmentationConfiguration {
+    static let camera = ActivitySegmentationConfiguration(
+        enterVelocity: 0.04,
+        exitVelocity: 0.015,
+        enterMovingFraction: 0.04,
+        exitMovingFraction: 0.015,
+        enterBoundingBoxMotion: 0.04,
+        exitBoundingBoxMotion: 0.015,
+        minimumActiveDuration: 0.5,
+        minimumRestDuration: 0.5,
+        shortTrackingGapDuration: 1
+    )
 }
 
 private struct MotionIntensityChart: View {
