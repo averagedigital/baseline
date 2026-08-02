@@ -1,6 +1,6 @@
 # Baseline
 
-iOS-приложение для сбора тренировочной телеметрии, хранения доказательных данных и формирования модели спортсмена для LLM-тренера.
+iOS-приложение для сбора тренировочной телеметрии, хранения данных и персонализации ответов ЛЛМ
 
 ## Стек
 
@@ -26,19 +26,6 @@ iOS-приложение для сбора тренировочной телем
 ```text
 apps/ios/Baseline/     iOS target и Xcode project
 packages/swift/        Swift packages и тесты
-```
-
-## Сборка
-
-```bash
-cd apps/ios/Baseline
-xcodegen generate --spec project.yml
-xcodebuild \
-  -project Baseline.xcodeproj \
-  -scheme Baseline \
-  -sdk iphonesimulator \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
-  build CODE_SIGNING_ALLOWED=NO
 ```
 
 ## Тесты
