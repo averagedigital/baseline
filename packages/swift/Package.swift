@@ -8,6 +8,7 @@ let package = Package(
     products: [
         .library(name: "AthleteCore", targets: ["AthleteCore"]),
         .library(name: "AthleteAgents", targets: ["AthleteAgents"]),
+        .library(name: "AthleteSensors", targets: ["AthleteSensors"]),
         .library(name: "AthleteStore", targets: ["AthleteStore"]),
     ],
     dependencies: [
@@ -16,12 +17,14 @@ let package = Package(
     targets: [
         .target(name: "AthleteCore"),
         .target(name: "AthleteAgents", dependencies: ["AthleteCore"]),
+        .target(name: "AthleteSensors", dependencies: ["AthleteCore"]),
         .target(
             name: "AthleteStore",
             dependencies: ["AthleteCore", .product(name: "GRDB", package: "GRDB.swift")]
         ),
         .testTarget(name: "AthleteCoreTests", dependencies: ["AthleteCore"]),
         .testTarget(name: "AthleteAgentsTests", dependencies: ["AthleteAgents", "AthleteCore"]),
+        .testTarget(name: "AthleteSensorsTests", dependencies: ["AthleteSensors"]),
         .testTarget(
             name: "AthleteStoreTests",
             dependencies: ["AthleteStore", "AthleteCore", .product(name: "GRDB", package: "GRDB.swift")]
