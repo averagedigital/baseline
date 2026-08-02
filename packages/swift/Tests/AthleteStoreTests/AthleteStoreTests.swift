@@ -67,6 +67,9 @@ func storesChatHistory() async throws {
     )
 
     #expect(try await store.chatThreads().map(\.id) == [first.id, second.id])
+    let firstThread = try #require(try await store.chatThreads().first)
+    #expect(firstThread.lastMessage == "Темп был ровным.")
+    #expect(firstThread.messageCount == 2)
     let messages = try await store.chatMessages(threadID: first.id)
     #expect(messages.map(\.role) == [.user, .assistant])
     #expect(messages.map(\.text) == ["Как прошёл подход?", "Темп был ровным."])

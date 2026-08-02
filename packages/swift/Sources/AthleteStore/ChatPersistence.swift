@@ -6,12 +6,23 @@ public struct ChatThread: Codable, Equatable, Identifiable, Sendable {
     public var title: String
     public let createdAt: Date
     public var updatedAt: Date
+    public var lastMessage: String?
+    public var messageCount: Int
 
-    public init(id: UUID = UUID(), title: String, createdAt: Date, updatedAt: Date) {
+    public init(
+        id: UUID = UUID(),
+        title: String,
+        createdAt: Date,
+        updatedAt: Date,
+        lastMessage: String? = nil,
+        messageCount: Int = 0
+    ) {
         self.id = id
         self.title = title
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.lastMessage = lastMessage
+        self.messageCount = messageCount
     }
 }
 
@@ -78,7 +89,26 @@ extension AthleteStore {
 
     public func chatThreads() throws -> [ChatThread] {
         try database.read { db in
-            try Row.fetchAll(db, sql: "SELECT * FROM chat_threads ORDER BY updated_at DESC").map(Self.decodeThread)
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT chat_threads.*,
+                           (
+                               SELECT text
+                               FROM chat_messages
+                               WHERE thread_id = chat_threads.id
+                               ORDER BY created_at DESC, rowid DESC
+                               LIMIT 1
+                           ) AS last_message,
+                           (
+                               SELECT COUNT(*)
+                               FROM chat_messages
+                               WHERE thread_id = chat_threads.id
+                           ) AS message_count
+                    FROM chat_threads
+                    ORDER BY updated_at DESC
+                    """
+            ).map(Self.decodeThread)
         }
     }
 
@@ -167,7 +197,9 @@ extension AthleteStore {
             id: id,
             title: row["title"],
             createdAt: row["created_at"],
-            updatedAt: row["updated_at"]
+            updatedAt: row["updated_at"],
+            lastMessage: row["last_message"],
+            messageCount: row["message_count"]
         )
     }
 
