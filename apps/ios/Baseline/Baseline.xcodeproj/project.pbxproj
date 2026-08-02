@@ -32,6 +32,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		107DE3C058E79682566EDD74 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		16DA502CB1FD925E869D9A12 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		1B387C5DB9AAB3CB39E27E9A /* DashboardModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardModel.swift; sourceTree = "<group>"; };
 		444EFEC840B90D25B3246576 /* AppShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShell.swift; sourceTree = "<group>"; };
@@ -74,6 +75,14 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
+		1FE14F8221EC2E7D8618286A /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				107DE3C058E79682566EDD74 /* Signing.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
 		395E0E8B872B7232D1875563 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -86,6 +95,7 @@
 		509392B522DBD54B11ECE0AB = {
 			isa = PBXGroup;
 			children = (
+				1FE14F8221EC2E7D8618286A /* Config */,
 				CCFACD52809546AAC3824F21 /* Packages */,
 				08B65A6D982A822B74C9E814 /* Sources */,
 				7282C7BC55BA73D6923BAED6 /* Tests */,
@@ -375,6 +385,7 @@
 		};
 		CF0526DD635D64A7B1C119FF /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 107DE3C058E79682566EDD74 /* Signing.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -398,6 +409,7 @@
 		};
 		F68E3464978FB1C061F8D589 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 107DE3C058E79682566EDD74 /* Signing.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";

@@ -10,6 +10,9 @@ targets:
   Baseline:
     type: application
     platform: iOS
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
     sources:
       - path: Sources
     dependencies:
