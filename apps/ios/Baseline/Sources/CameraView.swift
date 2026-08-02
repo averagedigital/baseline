@@ -98,7 +98,6 @@ struct CameraScreen: View {
                 isMirrored: model.cameraPosition == .front
             )
                 .ignoresSafeArea()
-            Color.black.opacity(0.12).ignoresSafeArea()
             PoseOverlay(samples: model.samples, state: model.trackingState)
                 .ignoresSafeArea()
 
@@ -115,13 +114,17 @@ struct CameraScreen: View {
         .background(Color.black)
         .task { await model.start() }
         .onDisappear { model.stop() }
+        .sensoryFeedback(.selection, trigger: model.cameraPosition)
     }
 
     private var header: some View {
         HStack {
-            Text("КАМЕРА / ЛОКАЛЬНО")
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .tracking(1)
+            HStack(spacing: 8) {
+                LiveIndicator()
+                Text(model.cameraPosition == .front ? "ФРОНТАЛЬНАЯ" : "ОСНОВНАЯ")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(1.2)
+            }
             Spacer()
             Button {
                 Task { await model.switchCamera() }
@@ -150,23 +153,28 @@ struct CameraScreen: View {
             Text(statusLabel)
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .tracking(1)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.black.opacity(0.58), in: Capsule())
                 .foregroundStyle(skeletonColor)
+                .shadow(color: .black.opacity(0.9), radius: 3, y: 1)
+                .padding(.bottom, 2)
         }
     }
 
     private var intensityChart: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("ИНТЕНСИВНОСТЬ")
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .tracking(1)
-                .foregroundStyle(.white.opacity(0.72))
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(.blue)
+                    .frame(width: 5, height: 5)
+                    .shadow(color: .blue.opacity(0.85), radius: 4)
+                Text("ИНТЕНСИВНОСТЬ")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(1)
+                    .foregroundStyle(.white.opacity(0.78))
+            }
             MotionIntensityChart(values: model.intensity.values)
                 .frame(height: 74)
         }
-        .shadow(color: .black.opacity(0.7), radius: 5, y: 2)
+        .shadow(color: .black.opacity(0.55), radius: 4, y: 1)
         .padding(.top, 12)
     }
 
@@ -205,10 +213,11 @@ private struct MotionIntensityChart: View {
             area.addLine(to: CGPoint(x: 0, y: size.height))
             area.closeSubpath()
             context.fill(area, with: .linearGradient(
-                Gradient(colors: [.blue.opacity(0.28), .blue.opacity(0.02)]),
+                Gradient(colors: [.blue.opacity(0.32), .blue.opacity(0)]),
                 startPoint: .zero,
                 endPoint: CGPoint(x: 0, y: size.height)
             ))
+            context.stroke(path, with: .color(.blue.opacity(0.28)), lineWidth: 7)
             context.stroke(path, with: .color(.blue), lineWidth: 2.5)
         }
         .accessibilityLabel("График интенсивности движений")
@@ -257,11 +266,14 @@ private struct PoseOverlay: View {
                 var path = Path()
                 path.move(to: start)
                 path.addLine(to: end)
+                context.stroke(path, with: .color(color.opacity(0.24)), lineWidth: 9)
                 context.stroke(path, with: .color(color), lineWidth: 3)
             }
             for point in points.values {
-                let rect = CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)
-                context.fill(Path(ellipseIn: rect), with: .color(color))
+                let glow = CGRect(x: point.x - 6, y: point.y - 6, width: 12, height: 12)
+                let core = CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)
+                context.fill(Path(ellipseIn: glow), with: .color(color.opacity(0.22)))
+                context.fill(Path(ellipseIn: core), with: .color(color))
             }
         }
     }
@@ -283,5 +295,20 @@ private struct PoseOverlay: View {
             (.leftHip, .leftKnee), (.leftKnee, .leftAnkle),
             (.rightHip, .rightKnee), (.rightKnee, .rightAnkle),
         ]
+    }
+}
+
+private struct LiveIndicator: View {
+    var body: some View {
+        PhaseAnimator([false, true]) { highlighted in
+            Circle()
+                .fill(.green)
+                .frame(width: 7, height: 7)
+                .scaleEffect(highlighted ? 1 : 0.78)
+                .shadow(color: .green.opacity(highlighted ? 0.9 : 0.35), radius: highlighted ? 5 : 2)
+        } animation: { _ in
+            .easeInOut(duration: 1.15)
+        }
+        .accessibilityHidden(true)
     }
 }
