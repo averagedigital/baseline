@@ -1,5 +1,7 @@
 import AthleteStore
 import AthleteSensors
+import AthleteAgents
+import AthleteCore
 import Foundation
 import Observation
 
@@ -177,8 +179,8 @@ final class ChatModel {
             errorMessage = "Локальная история недоступна"
             return
         }
-        Task { await recordDebrief(prompt, in: store) }
         guard let provider = selectedProvider else {
+            Task { await saveDebrief(prompt, in: store) }
             requiresProviderSettings = true
             return
         }
@@ -198,6 +200,7 @@ final class ChatModel {
         let context = conversation.responsesInput
         let userMessage = conversation.messages[conversation.messages.index(conversation.messages.endIndex, offsetBy: -2)]
         replyTask = Task { [weak self] in
+            await self?.recordDebrief(prompt, in: store, provider: provider, apiKey: apiKey)
             await self?.performRequest(
                 store: store,
                 provider: provider,
@@ -209,19 +212,38 @@ final class ChatModel {
         }
     }
 
-    private func recordDebrief(_ text: String, in store: AthleteStore) async {
+    private func recordDebrief(_ text: String, in store: AthleteStore, provider: ProviderConfiguration, apiKey: String) async {
         do {
             guard let session = try await store.latestEvidence(kind: "activity.session.v1"),
                   try await !store.hasEvidence(kind: "user.narrative.v1", derivedFrom: session.id) else {
                 return
             }
-            let narrative = try UserNarrativeBuilder().make(text: text, sessionEvidenceID: session.id)
-            let envelope = try narrative.envelope()
-            try await store.appendEvidence(envelope, payload: narrative)
+            try await appendDebrief(text, session: session, to: store)
+            _ = try await SessionMemoryBuilder(
+                store: store,
+                provider: ResponsesAgentProvider(provider: provider, apiKey: apiKey, client: client)
+            ).build(for: session.id)
             hasNewSession = false
         } catch {
             errorMessage = "Не удалось сохранить разбор тренировки"
         }
+    }
+
+    private func saveDebrief(_ text: String, in store: AthleteStore) async {
+        do {
+            guard let session = try await store.latestEvidence(kind: "activity.session.v1"),
+                  try await !store.hasEvidence(kind: "user.narrative.v1", derivedFrom: session.id) else { return }
+            try await appendDebrief(text, session: session, to: store)
+            hasNewSession = false
+        } catch {
+            errorMessage = "Не удалось сохранить разбор тренировки"
+        }
+    }
+
+    private func appendDebrief(_ text: String, session: EvidenceEnvelope, to store: AthleteStore) async throws {
+        let narrative = try UserNarrativeBuilder().make(text: text, sessionEvidenceID: session.id)
+        let envelope = try narrative.envelope()
+        try await store.appendEvidence(envelope, payload: narrative)
     }
 
     func stop() {

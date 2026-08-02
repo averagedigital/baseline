@@ -30,6 +30,7 @@ struct ResponsesAPIClient: Sendable {
     private struct RequestBody: Encodable {
         let model: String
         let input: [ResponsesInputMessage]
+        let instructions: String?
         let stream = true
         let store = false
     }
@@ -52,7 +53,8 @@ struct ResponsesAPIClient: Sendable {
     static func makeRequest(
         provider: ProviderConfiguration,
         apiKey: String,
-        messages: [ResponsesInputMessage]
+        messages: [ResponsesInputMessage],
+        instructions: String? = nil
     ) throws -> URLRequest {
         let base = provider.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -65,7 +67,7 @@ struct ResponsesAPIClient: Sendable {
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONEncoder().encode(
-            RequestBody(model: provider.model, input: messages)
+            RequestBody(model: provider.model, input: messages, instructions: instructions)
         )
         return request
     }
@@ -103,9 +105,10 @@ struct ResponsesAPIClient: Sendable {
         provider: ProviderConfiguration,
         apiKey: String,
         messages: [ResponsesInputMessage],
+        instructions: String? = nil,
         receive: @escaping @Sendable (String) async -> Void
     ) async throws {
-        let request = try Self.makeRequest(provider: provider, apiKey: apiKey, messages: messages)
+        let request = try Self.makeRequest(provider: provider, apiKey: apiKey, messages: messages, instructions: instructions)
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw ResponsesAPIError.invalidHTTPResponse
