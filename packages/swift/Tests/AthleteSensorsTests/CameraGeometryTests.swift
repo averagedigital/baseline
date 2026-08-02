@@ -43,3 +43,13 @@ func smoothsPoseCausally() {
     #expect(result.point.y == 0.25)
     #expect(result.point.confidence == 0.8)
 }
+
+@Test("Tracking quality не скрывает слабый и многопользовательский сигнал")
+func classifiesTrackingQuality() {
+    let classifier = TrackingQualityClassifier()
+
+    #expect(classifier.classify(sampleCount: 12, averageConfidence: 0.8, subjectCount: 1) == .stable)
+    #expect(classifier.classify(sampleCount: 7, averageConfidence: 0.4, subjectCount: 1) == .degraded)
+    #expect(classifier.classify(sampleCount: 3, averageConfidence: 0.9, subjectCount: 1) == .lost)
+    #expect(classifier.classify(sampleCount: 12, averageConfidence: 0.8, subjectCount: 2) == .multiplePeople)
+}

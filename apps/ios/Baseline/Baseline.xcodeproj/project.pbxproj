@@ -9,11 +9,14 @@
 /* Begin PBXBuildFile section */
 		0FDD88AF3620C5C490369E33 /* SampleDashboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A7838FE09CC06FD091D9A4C /* SampleDashboardTests.swift */; };
 		2788367BE0D28844B09A5DB2 /* AthleteAgents in Frameworks */ = {isa = PBXBuildFile; productRef = B54CE2216C37714AA23AC4D4 /* AthleteAgents */; };
+		5DA49EC8D1D80B052CABBBC8 /* AthleteStore in Frameworks */ = {isa = PBXBuildFile; productRef = 8DE0616B042A85FE7638C35F /* AthleteStore */; };
+		603F55226DB7422C69381DEF /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E55114F9CEDE340C6BD68CA /* CameraView.swift */; };
 		680C9E7216E051775620E86F /* BaselineApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC4E9AA70B1E388336CD0ED /* BaselineApp.swift */; };
 		878AF97DE50115396AD1178F /* DashboardModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B387C5DB9AAB3CB39E27E9A /* DashboardModel.swift */; };
 		C03425D115C3CE3C191AA0B5 /* BaselineTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D943F4CB734A0DE13B02BED8 /* BaselineTheme.swift */; };
+		C8785DD2C4810B8B74E2A659 /* CameraPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA264C8FAA0DD1EB9D630084 /* CameraPipeline.swift */; };
 		CBF7F22A61DDE7D23AFF1DEE /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16DA502CB1FD925E869D9A12 /* DashboardView.swift */; };
-		E82E2F3BFAC2914BD2959B91 /* AthleteStore in Frameworks */ = {isa = PBXBuildFile; productRef = 8DE0616B042A85FE7638C35F /* AthleteStore */; };
+		E82E2F3BFAC2914BD2959B91 /* AthleteSensors in Frameworks */ = {isa = PBXBuildFile; productRef = DE8D28D7B1A50EC05F427F31 /* AthleteSensors */; };
 		E8B98B74178A855552364738 /* AthleteCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5204AED981B0CD6645DCE74E /* AthleteCore */; };
 /* End PBXBuildFile section */
 
@@ -31,9 +34,11 @@
 		16DA502CB1FD925E869D9A12 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		1B387C5DB9AAB3CB39E27E9A /* DashboardModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardModel.swift; sourceTree = "<group>"; };
 		4A7838FE09CC06FD091D9A4C /* SampleDashboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleDashboardTests.swift; sourceTree = "<group>"; };
+		6E55114F9CEDE340C6BD68CA /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
 		8DC4E9AA70B1E388336CD0ED /* BaselineApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BaselineApp.swift; sourceTree = "<group>"; };
 		917EC6C734FA7FDEF274FFAD /* Baseline.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Baseline.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A6C5F86354C722884254D09A /* BaselineTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BaselineTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		BA264C8FAA0DD1EB9D630084 /* CameraPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPipeline.swift; sourceTree = "<group>"; };
 		D4BF0502C15A39A230CAA052 /* swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = swift; path = ../../../packages/swift; sourceTree = SOURCE_ROOT; };
 		D943F4CB734A0DE13B02BED8 /* BaselineTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BaselineTheme.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -45,7 +50,8 @@
 			files = (
 				E8B98B74178A855552364738 /* AthleteCore in Frameworks */,
 				2788367BE0D28844B09A5DB2 /* AthleteAgents in Frameworks */,
-				E82E2F3BFAC2914BD2959B91 /* AthleteStore in Frameworks */,
+				E82E2F3BFAC2914BD2959B91 /* AthleteSensors in Frameworks */,
+				5DA49EC8D1D80B052CABBBC8 /* AthleteStore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -57,6 +63,8 @@
 			children = (
 				8DC4E9AA70B1E388336CD0ED /* BaselineApp.swift */,
 				D943F4CB734A0DE13B02BED8 /* BaselineTheme.swift */,
+				BA264C8FAA0DD1EB9D630084 /* CameraPipeline.swift */,
+				6E55114F9CEDE340C6BD68CA /* CameraView.swift */,
 				1B387C5DB9AAB3CB39E27E9A /* DashboardModel.swift */,
 				16DA502CB1FD925E869D9A12 /* DashboardView.swift */,
 			);
@@ -116,6 +124,7 @@
 			packageProductDependencies = (
 				5204AED981B0CD6645DCE74E /* AthleteCore */,
 				B54CE2216C37714AA23AC4D4 /* AthleteAgents */,
+				DE8D28D7B1A50EC05F427F31 /* AthleteSensors */,
 				8DE0616B042A85FE7638C35F /* AthleteStore */,
 			);
 			productName = Baseline;
@@ -187,6 +196,8 @@
 			files = (
 				680C9E7216E051775620E86F /* BaselineApp.swift in Sources */,
 				C03425D115C3CE3C191AA0B5 /* BaselineTheme.swift in Sources */,
+				C8785DD2C4810B8B74E2A659 /* CameraPipeline.swift in Sources */,
+				603F55226DB7422C69381DEF /* CameraView.swift in Sources */,
 				878AF97DE50115396AD1178F /* DashboardModel.swift in Sources */,
 				CBF7F22A61DDE7D23AFF1DEE /* DashboardView.swift in Sources */,
 			);
@@ -365,6 +376,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Baseline;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Камера используется для локального анализа позы во время тренировки.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -387,6 +399,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Baseline;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Камера используется для локального анализа позы во время тренировки.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -453,6 +466,10 @@
 		B54CE2216C37714AA23AC4D4 /* AthleteAgents */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AthleteAgents;
+		};
+		DE8D28D7B1A50EC05F427F31 /* AthleteSensors */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AthleteSensors;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

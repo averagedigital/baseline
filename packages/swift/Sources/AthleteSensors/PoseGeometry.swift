@@ -80,3 +80,35 @@ public struct PoseSmoother: Sendable {
         return PoseSample(joint: sample.joint, point: point)
     }
 }
+
+public enum PoseTrackingState: String, Codable, Equatable, Sendable {
+    case stable
+    case degraded
+    case lost
+    case multiplePeople
+}
+
+public struct TrackingQualityClassifier: Sendable {
+    public init() {}
+
+    public func classify(
+        sampleCount: Int,
+        averageConfidence: Double,
+        subjectCount: Int
+    ) -> PoseTrackingState {
+        if subjectCount > 1 { return .multiplePeople }
+        if sampleCount >= 10, averageConfidence >= 0.45 { return .stable }
+        if sampleCount >= 5, averageConfidence >= 0.25 { return .degraded }
+        return .lost
+    }
+}
+
+public struct PoseFrame: Equatable, Sendable {
+    public let samples: [PoseSample]
+    public let trackingState: PoseTrackingState
+
+    public init(samples: [PoseSample], trackingState: PoseTrackingState) {
+        self.samples = samples
+        self.trackingState = trackingState
+    }
+}

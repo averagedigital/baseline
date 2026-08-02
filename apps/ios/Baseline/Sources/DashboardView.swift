@@ -3,6 +3,7 @@ import SwiftUI
 
 struct DashboardView: View {
     let state: DashboardState
+    @State private var isCameraPresented = false
 
     var body: some View {
         ZStack {
@@ -28,6 +29,9 @@ struct DashboardView: View {
             .scrollIndicators(.hidden)
         }
         .foregroundStyle(BaselineTheme.ink)
+        .fullScreenCover(isPresented: $isCameraPresented) {
+            CameraScreen()
+        }
     }
 
     private var brand: some View {
@@ -38,6 +42,15 @@ struct DashboardView: View {
                 .foregroundStyle(BaselineTheme.accent)
                 .tracking(0.5)
             Spacer()
+            Button("Открыть камеру", systemImage: "camera") {
+                isCameraPresented = true
+            }
+            .labelStyle(.iconOnly)
+            .frame(width: 40, height: 40)
+            .foregroundStyle(BaselineTheme.accent)
+            .overlay {
+                RoundedRectangle(cornerRadius: 12).stroke(BaselineTheme.line, lineWidth: 1)
+            }
             Text("ДЕМО-ДАННЫЕ")
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .tracking(1.1)
