@@ -10,6 +10,7 @@ final class CameraModel {
     var trackingState: PoseTrackingState = .lost
     var errorMessage: String?
     var isRunning = false
+    var cameraPosition: CaptureCameraPosition = .front
     var intensity = MotionIntensityHistory(limit: 90)
 
     let pipeline: CameraPipeline
@@ -73,6 +74,18 @@ final class CameraModel {
         samples = []
         trackingState = .lost
     }
+
+    func switchCamera() async {
+        let target = cameraPosition.toggled
+        do {
+            try await pipeline.switchCamera(to: target)
+            cameraPosition = target
+            previousSamples = [:]
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
 }
 
 struct CameraScreen: View {
@@ -80,7 +93,10 @@ struct CameraScreen: View {
 
     var body: some View {
         ZStack {
-            CameraPreview(session: model.pipeline.session)
+            CameraPreview(
+                session: model.pipeline.session,
+                isMirrored: model.cameraPosition == .front
+            )
                 .ignoresSafeArea()
             Color.black.opacity(0.12).ignoresSafeArea()
             PoseOverlay(samples: model.samples, state: model.trackingState)
@@ -107,9 +123,16 @@ struct CameraScreen: View {
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .tracking(1)
             Spacer()
-            Circle()
-                .fill(model.isRunning ? Color.green : BaselineTheme.muted)
-                .frame(width: 8, height: 8)
+            Button {
+                Task { await model.switchCamera() }
+            } label: {
+                Image(systemName: "camera.rotate.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 42, height: 42)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .foregroundStyle(.white)
+            .accessibilityLabel("Переключить камеру")
         }
         .foregroundStyle(.white)
     }
@@ -143,8 +166,7 @@ struct CameraScreen: View {
             MotionIntensityChart(values: model.intensity.values)
                 .frame(height: 74)
         }
-        .padding(14)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
+        .shadow(color: .black.opacity(0.7), radius: 5, y: 2)
         .padding(.top, 12)
     }
 
@@ -178,7 +200,16 @@ private struct MotionIntensityChart: View {
                 if index == 0 { path.move(to: CGPoint(x: x, y: y)) }
                 else { path.addLine(to: CGPoint(x: x, y: y)) }
             }
-            context.stroke(path, with: .color(.green), lineWidth: 2.5)
+            var area = path
+            area.addLine(to: CGPoint(x: size.width, y: size.height))
+            area.addLine(to: CGPoint(x: 0, y: size.height))
+            area.closeSubpath()
+            context.fill(area, with: .linearGradient(
+                Gradient(colors: [.blue.opacity(0.28), .blue.opacity(0.02)]),
+                startPoint: .zero,
+                endPoint: CGPoint(x: 0, y: size.height)
+            ))
+            context.stroke(path, with: .color(.blue), lineWidth: 2.5)
         }
         .accessibilityLabel("График интенсивности движений")
     }
@@ -186,15 +217,25 @@ private struct MotionIntensityChart: View {
 
 private struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
+    let isMirrored: Bool
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
+        updateMirroring(view.previewLayer)
         return view
     }
 
-    func updateUIView(_ uiView: PreviewView, context: Context) {}
+    func updateUIView(_ uiView: PreviewView, context: Context) {
+        updateMirroring(uiView.previewLayer)
+    }
+
+    private func updateMirroring(_ layer: AVCaptureVideoPreviewLayer) {
+        guard let connection = layer.connection, connection.isVideoMirroringSupported else { return }
+        connection.automaticallyAdjustsVideoMirroring = false
+        connection.isVideoMirrored = isMirrored
+    }
 }
 
 private final class PreviewView: UIView {
@@ -228,7 +269,7 @@ private struct PoseOverlay: View {
     private var color: Color {
         switch state {
         case .stable: .green
-        case .degraded, .multiplePeople: BaselineTheme.accent
+        case .degraded, .multiplePeople: .green
         case .lost: .clear
         }
     }

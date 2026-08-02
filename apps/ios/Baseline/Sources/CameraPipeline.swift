@@ -3,6 +3,22 @@ import AthleteSensors
 import ImageIO
 import Vision
 
+enum CaptureCameraPosition: Sendable {
+    case front
+    case back
+
+    var toggled: Self {
+        self == .front ? .back : .front
+    }
+
+    var avPosition: AVCaptureDevice.Position {
+        switch self {
+        case .front: .front
+        case .back: .back
+        }
+    }
+}
+
 final class CameraPipeline: NSObject, @unchecked Sendable {
     let session = AVCaptureSession()
     var onFrame: (@Sendable (PoseFrame) -> Void)?
@@ -13,6 +29,8 @@ final class CameraPipeline: NSObject, @unchecked Sendable {
     private let request = VNDetectHumanBodyPoseRequest()
     private var smoother = PoseSmoother(alpha: 0.25)
     private var isConfigured = false
+    private var cameraInput: AVCaptureDeviceInput?
+    private var cameraPosition: CaptureCameraPosition = .front
 
     func start() async throws {
         try await withCheckedThrowingContinuation { continuation in
@@ -41,23 +59,30 @@ final class CameraPipeline: NSObject, @unchecked Sendable {
         }
     }
 
+    func switchCamera(to position: CaptureCameraPosition) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async { [self] in
+                do {
+                    guard isConfigured else {
+                        cameraPosition = position
+                        continuation.resume()
+                        return
+                    }
+                    try replaceCameraInput(with: position)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     private func configure() throws {
         session.beginConfiguration()
         defer { session.commitConfiguration() }
         session.sessionPreset = .hd1280x720
 
-        guard let device = AVCaptureDevice.default(
-            .builtInWideAngleCamera,
-            for: .video,
-            position: .back
-        ) else {
-            throw CameraPipelineError.backCameraUnavailable
-        }
-        let input = try AVCaptureDeviceInput(device: device)
-        guard session.canAddInput(input) else {
-            throw CameraPipelineError.inputRejected
-        }
-        session.addInput(input)
+        try addCameraInput(position: cameraPosition)
 
         output.alwaysDiscardsLateVideoFrames = true
         output.videoSettings = [
@@ -75,6 +100,51 @@ final class CameraPipeline: NSObject, @unchecked Sendable {
             }
             connection.isVideoMirrored = false
         }
+    }
+
+    private func addCameraInput(position: CaptureCameraPosition) throws {
+        guard let device = AVCaptureDevice.default(
+            .builtInWideAngleCamera,
+            for: .video,
+            position: position.avPosition
+        ) else {
+            throw CameraPipelineError.cameraUnavailable(position)
+        }
+        let input = try AVCaptureDeviceInput(device: device)
+        guard session.canAddInput(input) else {
+            throw CameraPipelineError.inputRejected
+        }
+        session.addInput(input)
+        cameraInput = input
+        cameraPosition = position
+    }
+
+    private func replaceCameraInput(with position: CaptureCameraPosition) throws {
+        guard position != cameraPosition else { return }
+        guard let device = AVCaptureDevice.default(
+            .builtInWideAngleCamera,
+            for: .video,
+            position: position.avPosition
+        ) else {
+            throw CameraPipelineError.cameraUnavailable(position)
+        }
+        let newInput = try AVCaptureDeviceInput(device: device)
+
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+        if let cameraInput {
+            session.removeInput(cameraInput)
+        }
+        guard session.canAddInput(newInput) else {
+            if let cameraInput, session.canAddInput(cameraInput) {
+                session.addInput(cameraInput)
+            }
+            throw CameraPipelineError.inputRejected
+        }
+        session.addInput(newInput)
+        cameraInput = newInput
+        cameraPosition = position
+        smoother = PoseSmoother(alpha: 0.25)
     }
 }
 
@@ -117,7 +187,7 @@ extension CameraPipeline: AVCaptureVideoDataOutputSampleBufferDelegate {
                 averageConfidence: confidence,
                 subjectCount: observations.count
             )
-            let geometry = CameraGeometry(isMirrored: false)
+            let geometry = CameraGeometry(isMirrored: cameraPosition == .front)
             onFrame?(PoseFrame(
                 samples: samples.map(geometry.displaySample),
                 trackingState: state
@@ -141,13 +211,14 @@ extension CameraPipeline: AVCaptureVideoDataOutputSampleBufferDelegate {
 }
 
 enum CameraPipelineError: LocalizedError {
-    case backCameraUnavailable
+    case cameraUnavailable(CaptureCameraPosition)
     case inputRejected
     case outputRejected
 
     var errorDescription: String? {
         switch self {
-        case .backCameraUnavailable: "Задняя камера недоступна."
+        case .cameraUnavailable(.front): "Фронтальная камера недоступна."
+        case .cameraUnavailable(.back): "Задняя камера недоступна."
         case .inputRejected: "Не удалось подключить вход камеры."
         case .outputRejected: "Не удалось подключить поток камеры."
         }

@@ -17,3 +17,9 @@ func boundsIntensityHistory() {
 
     #expect(history.values == [0.4, 0.8, 1])
 }
+
+@Test("Положение камеры переключается между фронтальным и задним")
+func togglesCameraPosition() {
+    #expect(CaptureCameraPosition.front.toggled == .back)
+    #expect(CaptureCameraPosition.back.toggled == .front)
+}
