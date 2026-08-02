@@ -1,5 +1,6 @@
 import AthleteAgents
 import AthleteCore
+import AthleteStore
 import Foundation
 import Testing
 
@@ -110,4 +111,27 @@ func stateBuilderRejectsUngroundedOutput() async throws {
             promptVersion: "state-builder-v1"
         ))
     }
+}
+
+@Test("Evidence проходит через State Builder в verified session memory")
+func persistsVerifiedSessionMemory() async throws {
+    let store = try AthleteStore.inMemory()
+    let evidence = EvidenceEnvelope(
+        id: UUID(), moduleID: "org.baseline.activity", moduleVersion: "v1", kind: "activity.session.v1",
+        observedFrom: Date(timeIntervalSince1970: 100), observedTo: Date(timeIntervalSince1970: 200),
+        ingestedAt: Date(timeIntervalSince1970: 200), epistemicRole: .computed,
+        provenance: Provenance(sourceID: "test", producerID: "activity", producerVersion: "v1", method: nil),
+        privacyClass: .sensitiveLocal,
+        payload: PayloadReference(mediaType: "application/json", schemaID: nil, schemaVersion: nil, storageURI: "baseline://test"),
+        derivedFrom: [], supersedes: nil, contentDigest: "sha256:test"
+    )
+    try await store.appendEvidence(evidence)
+    let provider = MockProvider(responses: [AgentResponse(
+        text: "Сессия сохранена [ev:\(evidence.id.uuidString)].", providerID: "mock", modelID: "mock-state"
+    )])
+
+    let document = try await SessionMemoryBuilder(store: store, provider: provider).build(for: evidence.id)
+
+    #expect(document.verificationStatus == .verified)
+    #expect(try await store.memory(id: document.id)?.verificationStatus == .verified)
 }
