@@ -1,4 +1,6 @@
 import Testing
+import AthleteStore
+import Foundation
 @testable import Baseline
 
 @Test("Приложение содержит только камеру и чат")
@@ -61,4 +63,58 @@ func completesStreamingReply() {
     #expect(conversation.messages.last?.text == "Сначала проверим нагрузку.")
     #expect(conversation.messages.last?.state == .sent)
     #expect(!conversation.isResponding)
+}
+
+@Test("Responses API запрос содержит локальный контекст и не хранится у провайдера")
+func buildsResponsesAPIRequest() throws {
+    let provider = ProviderConfiguration(
+        name: "OpenAI",
+        baseURL: "https://api.openai.com/v1/",
+        model: "gpt-5.6"
+    )
+    let messages = [
+        ResponsesInputMessage(role: .user, content: "Разбери подход"),
+        ResponsesInputMessage(role: .assistant, content: "Пришли запись"),
+    ]
+
+    let request = try ResponsesAPIClient.makeRequest(
+        provider: provider,
+        apiKey: "test-key",
+        messages: messages
+    )
+    let body = try #require(request.httpBody)
+    let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let input = try #require(json["input"] as? [[String: Any]])
+
+    #expect(request.url?.absoluteString == "https://api.openai.com/v1/responses")
+    #expect(request.httpMethod == "POST")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-key")
+    #expect(json["model"] as? String == "gpt-5.6")
+    #expect(json["stream"] as? Bool == true)
+    #expect(json["store"] as? Bool == false)
+    #expect(input.map { $0["role"] as? String } == ["user", "assistant"])
+    #expect(input.map { $0["content"] as? String } == ["Разбери подход", "Пришли запись"])
+}
+
+@Test("Responses API parser принимает только текстовые delta")
+func parsesResponsesAPIEvents() throws {
+    let delta = try ResponsesAPIClient.parseEvent(
+        #"data: {"type":"response.output_text.delta","delta":"Ровный темп"}"#
+    )
+    let completed = try ResponsesAPIClient.parseEvent(
+        #"data: {"type":"response.completed","response":{"id":"resp_1"}}"#
+    )
+
+    #expect(delta == .textDelta("Ровный темп"))
+    #expect(completed == .completed)
+    #expect(try ResponsesAPIClient.parseEvent("event: response.output_text.delta") == nil)
+}
+
+@Test("Responses API parser возвращает ошибку провайдера")
+func parsesResponsesAPIError() throws {
+    let event = try ResponsesAPIClient.parseEvent(
+        #"data: {"type":"error","message":"Неверный ключ"}"#
+    )
+
+    #expect(event == .failure("Неверный ключ"))
 }

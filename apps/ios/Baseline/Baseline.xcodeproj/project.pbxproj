@@ -9,8 +9,10 @@
 /* Begin PBXBuildFile section */
 		0FDD88AF3620C5C490369E33 /* SampleDashboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A7838FE09CC06FD091D9A4C /* SampleDashboardTests.swift */; };
 		2788367BE0D28844B09A5DB2 /* AthleteAgents in Frameworks */ = {isa = PBXBuildFile; productRef = B54CE2216C37714AA23AC4D4 /* AthleteAgents */; };
+		3269353CAD06E097F5DE480B /* APIKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9AF535E570C28F824210716 /* APIKeyStore.swift */; };
 		4831FEAE90CB66F844863B75 /* AppShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444EFEC840B90D25B3246576 /* AppShell.swift */; };
 		5DA49EC8D1D80B052CABBBC8 /* AthleteStore in Frameworks */ = {isa = PBXBuildFile; productRef = 8DE0616B042A85FE7638C35F /* AthleteStore */; };
+		5E2500A7AA535F36F14F751C /* ResponsesAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 609DE69CACEE0D6A552DC0E9 /* ResponsesAPIClient.swift */; };
 		603F55226DB7422C69381DEF /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E55114F9CEDE340C6BD68CA /* CameraView.swift */; };
 		680C9E7216E051775620E86F /* BaselineApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC4E9AA70B1E388336CD0ED /* BaselineApp.swift */; };
 		878AF97DE50115396AD1178F /* DashboardModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B387C5DB9AAB3CB39E27E9A /* DashboardModel.swift */; };
@@ -37,6 +39,7 @@
 		1B387C5DB9AAB3CB39E27E9A /* DashboardModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardModel.swift; sourceTree = "<group>"; };
 		444EFEC840B90D25B3246576 /* AppShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShell.swift; sourceTree = "<group>"; };
 		4A7838FE09CC06FD091D9A4C /* SampleDashboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleDashboardTests.swift; sourceTree = "<group>"; };
+		609DE69CACEE0D6A552DC0E9 /* ResponsesAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponsesAPIClient.swift; sourceTree = "<group>"; };
 		6E55114F9CEDE340C6BD68CA /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
 		8DC4E9AA70B1E388336CD0ED /* BaselineApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BaselineApp.swift; sourceTree = "<group>"; };
 		917EC6C734FA7FDEF274FFAD /* Baseline.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Baseline.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -44,6 +47,7 @@
 		BA264C8FAA0DD1EB9D630084 /* CameraPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPipeline.swift; sourceTree = "<group>"; };
 		D4BF0502C15A39A230CAA052 /* swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = swift; path = ../../../packages/swift; sourceTree = SOURCE_ROOT; };
 		D943F4CB734A0DE13B02BED8 /* BaselineTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BaselineTheme.swift; sourceTree = "<group>"; };
+		D9AF535E570C28F824210716 /* APIKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIKeyStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -64,6 +68,7 @@
 		08B65A6D982A822B74C9E814 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				D9AF535E570C28F824210716 /* APIKeyStore.swift */,
 				444EFEC840B90D25B3246576 /* AppShell.swift */,
 				8DC4E9AA70B1E388336CD0ED /* BaselineApp.swift */,
 				D943F4CB734A0DE13B02BED8 /* BaselineTheme.swift */,
@@ -71,6 +76,7 @@
 				6E55114F9CEDE340C6BD68CA /* CameraView.swift */,
 				1B387C5DB9AAB3CB39E27E9A /* DashboardModel.swift */,
 				16DA502CB1FD925E869D9A12 /* DashboardView.swift */,
+				609DE69CACEE0D6A552DC0E9 /* ResponsesAPIClient.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -207,6 +213,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3269353CAD06E097F5DE480B /* APIKeyStore.swift in Sources */,
 				4831FEAE90CB66F844863B75 /* AppShell.swift in Sources */,
 				680C9E7216E051775620E86F /* BaselineApp.swift in Sources */,
 				C03425D115C3CE3C191AA0B5 /* BaselineTheme.swift in Sources */,
@@ -214,6 +221,7 @@
 				603F55226DB7422C69381DEF /* CameraView.swift in Sources */,
 				878AF97DE50115396AD1178F /* DashboardModel.swift in Sources */,
 				CBF7F22A61DDE7D23AFF1DEE /* DashboardView.swift in Sources */,
+				5E2500A7AA535F36F14F751C /* ResponsesAPIClient.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
