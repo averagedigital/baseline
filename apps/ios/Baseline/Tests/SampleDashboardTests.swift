@@ -1,17 +1,19 @@
-import AthleteCore
 import Testing
 @testable import Baseline
 
-@Test("Sample state разделяет вычисления, гипотезы и слова пользователя")
-func sampleStateKeepsEpistemicRoles() {
-    let state = SampleDashboard.fixture
-
-    #expect(state.entries.map(\.role) == [.computed, .inferred, .userReported])
-    #expect(state.entries.first?.artifactID != nil)
-    #expect(state.entries.last?.artifactID == nil)
+@Test("Приложение содержит только камеру и чат")
+func exposesTwoPrimaryTabs() {
+    #expect(AppTab.allCases == [.camera, .chat])
 }
 
-@Test("Sample state явно сообщает о пробеле данных")
-func sampleStateShowsDataGap() {
-    #expect(SampleDashboard.fixture.dataGap.isEmpty == false)
+@Test("График интенсивности хранит ограниченное число значений")
+func boundsIntensityHistory() {
+    var history = MotionIntensityHistory(limit: 3)
+
+    history.append(-1)
+    history.append(0.4)
+    history.append(0.8)
+    history.append(2)
+
+    #expect(history.values == [0.4, 0.8, 1])
 }

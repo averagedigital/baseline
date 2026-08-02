@@ -10,13 +10,16 @@ final class CameraModel {
     var trackingState: PoseTrackingState = .lost
     var errorMessage: String?
     var isRunning = false
+    var intensity = MotionIntensityHistory(limit: 90)
 
     let pipeline: CameraPipeline
+    private var previousSamples: [PoseJoint: NormalizedPosePoint] = [:]
 
     init(pipeline: CameraPipeline = CameraPipeline()) {
         self.pipeline = pipeline
         pipeline.onFrame = { [weak self] frame in
             Task { @MainActor in
+                self?.recordIntensity(frame.samples)
                 self?.samples = frame.samples
                 self?.trackingState = frame.trackingState
             }
@@ -26,6 +29,17 @@ final class CameraModel {
                 self?.errorMessage = message
             }
         }
+    }
+
+    private func recordIntensity(_ samples: [PoseSample]) {
+        let current = Dictionary(uniqueKeysWithValues: samples.map { ($0.joint, $0.point) })
+        let distances = current.compactMap { joint, point -> Double? in
+            guard let previous = previousSamples[joint] else { return nil }
+            return hypot(point.x - previous.x, point.y - previous.y)
+        }
+        let average = distances.isEmpty ? 0 : distances.reduce(0, +) / Double(distances.count)
+        intensity.append(average * 8)
+        previousSamples = current
     }
 
     func start() async {
@@ -62,7 +76,6 @@ final class CameraModel {
 }
 
 struct CameraScreen: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var model = CameraModel()
 
     var body: some View {
@@ -77,9 +90,11 @@ struct CameraScreen: View {
                 header
                 Spacer()
                 status
-                control
+                intensityChart
             }
-            .padding(20)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
         }
         .background(Color.black)
         .task { await model.start() }
@@ -92,10 +107,9 @@ struct CameraScreen: View {
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .tracking(1)
             Spacer()
-            Button("Закрыть", systemImage: "xmark") { dismiss() }
-                .labelStyle(.iconOnly)
-                .frame(width: 44, height: 44)
-                .background(.black.opacity(0.46), in: Circle())
+            Circle()
+                .fill(model.isRunning ? Color.green : BaselineTheme.muted)
+                .frame(width: 8, height: 8)
         }
         .foregroundStyle(.white)
     }
@@ -120,23 +134,17 @@ struct CameraScreen: View {
         }
     }
 
-    private var control: some View {
-        Button {
-            if model.isRunning {
-                model.stop()
-            } else {
-                Task { await model.start() }
-            }
-        } label: {
-            Text(model.isRunning ? "ОСТАНОВИТЬ" : "НАЧАТЬ")
-                .font(.system(size: 14, weight: .black, design: .monospaced))
+    private var intensityChart: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("ИНТЕНСИВНОСТЬ")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .tracking(1)
-                .frame(maxWidth: .infinity)
-                .frame(height: 56)
+                .foregroundStyle(.white.opacity(0.72))
+            MotionIntensityChart(values: model.intensity.values)
+                .frame(height: 74)
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(BaselineTheme.shell)
-        .background(BaselineTheme.accent, in: RoundedRectangle(cornerRadius: 16))
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
         .padding(.top, 12)
     }
 
@@ -151,10 +159,28 @@ struct CameraScreen: View {
 
     private var skeletonColor: Color {
         switch model.trackingState {
-        case .stable: .green
-        case .degraded, .multiplePeople: BaselineTheme.accent
+        case .stable, .degraded, .multiplePeople: .green
         case .lost: .clear
         }
+    }
+}
+
+private struct MotionIntensityChart: View {
+    let values: [Double]
+
+    var body: some View {
+        Canvas { context, size in
+            guard values.count > 1 else { return }
+            var path = Path()
+            for (index, value) in values.enumerated() {
+                let x = CGFloat(index) / CGFloat(values.count - 1) * size.width
+                let y = size.height * (1 - CGFloat(value))
+                if index == 0 { path.move(to: CGPoint(x: x, y: y)) }
+                else { path.addLine(to: CGPoint(x: x, y: y)) }
+            }
+            context.stroke(path, with: .color(.green), lineWidth: 2.5)
+        }
+        .accessibilityLabel("График интенсивности движений")
     }
 }
 
