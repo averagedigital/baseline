@@ -118,3 +118,44 @@ func parsesResponsesAPIError() throws {
 
     #expect(event == .failure("Неверный ключ"))
 }
+
+@Test("Сохранённая история восстанавливает контекст Responses API")
+func restoresResponsesContext() {
+    let threadID = UUID()
+    let history = [
+        ChatHistoryMessage(threadID: threadID, role: .user, text: "Первый вопрос"),
+        ChatHistoryMessage(threadID: threadID, role: .assistant, text: "Первый ответ"),
+    ]
+
+    let conversation = ChatConversation(history: history)
+
+    #expect(conversation.messages.map(\.text) == ["Первый вопрос", "Первый ответ"])
+    #expect(conversation.responsesInput == [
+        ResponsesInputMessage(role: .user, content: "Первый вопрос"),
+        ResponsesInputMessage(role: .assistant, content: "Первый ответ"),
+    ])
+}
+
+@Test("Незавершённый ответ не попадает в следующий контекст")
+func excludesIncompleteResponseFromContext() {
+    var conversation = ChatConversation()
+    _ = conversation.startUserTurn("Новый вопрос")
+
+    #expect(conversation.responsesInput == [
+        ResponsesInputMessage(role: .user, content: "Новый вопрос"),
+    ])
+}
+
+@Test("Ошибка Responses API удаляет незавершённый ответ из контекста")
+func discardsFailedResponse() {
+    var conversation = ChatConversation()
+    _ = conversation.startUserTurn("Новый вопрос")
+    conversation.appendAssistantDelta("Неполный ответ")
+
+    conversation.discardAssistantReply()
+
+    #expect(conversation.messages.count == 1)
+    #expect(conversation.responsesInput == [
+        ResponsesInputMessage(role: .user, content: "Новый вопрос"),
+    ])
+}

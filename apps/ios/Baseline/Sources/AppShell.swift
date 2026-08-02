@@ -1,4 +1,3 @@
-import Observation
 import SwiftUI
 
 enum AppTab: CaseIterable {
@@ -30,118 +29,10 @@ struct AppShell: View {
     }
 }
 
-struct ChatMessage: Identifiable, Equatable, Sendable {
-    enum Role: Equatable, Sendable {
-        case user
-        case assistant
-    }
-
-    enum State: Equatable, Sendable {
-        case sent
-        case streaming
-    }
-
-    let id: UUID
-    let role: Role
-    var text: String
-    var state: State
-
-    init(id: UUID = UUID(), role: Role, text: String, state: State = .sent) {
-        self.id = id
-        self.role = role
-        self.text = text
-        self.state = state
-    }
-}
-
-struct ChatConversation: Equatable, Sendable {
-    private(set) var messages: [ChatMessage] = []
-
-    var isResponding: Bool {
-        messages.last?.state == .streaming
-    }
-
-    mutating func startUserTurn(_ input: String) -> Bool {
-        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isResponding else { return false }
-        messages.append(ChatMessage(role: .user, text: text))
-        messages.append(ChatMessage(role: .assistant, text: "", state: .streaming))
-        return true
-    }
-
-    mutating func appendAssistantDelta(_ delta: String) {
-        guard isResponding else { return }
-        messages[messages.index(before: messages.endIndex)].text += delta
-    }
-
-    mutating func finishAssistantReply() {
-        guard isResponding else { return }
-        let index = messages.index(before: messages.endIndex)
-        if messages[index].text.isEmpty {
-            messages.remove(at: index)
-        } else {
-            messages[index].state = .sent
-        }
-    }
-}
-
-@MainActor
-@Observable
-final class ChatModel {
-    var draft = ""
-    var conversation = ChatConversation()
-    private var replyTask: Task<Void, Never>?
-
-    func send(_ input: String? = nil) {
-        let prompt = input ?? draft
-        guard conversation.startUserTurn(prompt) else { return }
-        draft = ""
-        replyTask?.cancel()
-        let chunks = previewReply(for: prompt)
-        replyTask = Task { [weak self] in
-            for chunk in chunks {
-                do {
-                    try await Task.sleep(for: .milliseconds(90))
-                } catch {
-                    return
-                }
-                self?.conversation.appendAssistantDelta(chunk)
-            }
-            self?.conversation.finishAssistantReply()
-        }
-    }
-
-    func stop() {
-        replyTask?.cancel()
-        replyTask = nil
-        conversation.finishAssistantReply()
-    }
-
-    func reset() {
-        replyTask?.cancel()
-        replyTask = nil
-        draft = ""
-        conversation = ChatConversation()
-    }
-
-    private func previewReply(for prompt: String) -> [String] {
-        let text = prompt.lowercased()
-        let reply: String
-        if text.contains("восстанов") || text.contains("сон") {
-            reply = "Для оценки восстановления мне понадобятся сон, самочувствие и последняя нагрузка. После подключения данных я сопоставлю их и предложу конкретный режим на сегодня."
-        } else if text.contains("трениров") || text.contains("техник") {
-            reply = "Разбор тренировки будет опираться на движение в кадре, интенсивность подходов и паузы. Я выделю отклонения и верну короткие корректировки без лишней статистики."
-        } else {
-            reply = "Я соберу контекст тренировки, уточню недостающие данные и дам короткий план действий. История диалога сохранит связь между нагрузкой, восстановлением и прогрессом."
-        }
-        return reply.split(separator: " ").enumerated().map { index, word in
-            index == 0 ? String(word) : " \(word)"
-        }
-    }
-}
-
 private struct ChatScreen: View {
     @State private var model = ChatModel()
+    @State private var showsHistory = false
+    @State private var showsSettings = false
 
     private let suggestions = [
         "Разбери последнюю тренировку",
@@ -180,17 +71,58 @@ private struct ChatScreen: View {
             .navigationTitle("Baseline")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showsHistory = true } label: {
+                        Image(systemName: "sidebar.left")
+                    }
+                    .disabled(model.conversation.isResponding)
+                    .accessibilityLabel("История диалогов")
+                }
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 1) {
+                        Text("Baseline")
+                            .font(.headline)
+                        Text(model.selectedProvider?.model ?? "Responses API не настроен")
+                            .font(.caption2)
+                            .foregroundStyle(BaselineTheme.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: model.reset) {
+                    Button(action: model.newChat) {
                         Image(systemName: "square.and.pencil")
                     }
-                    .disabled(model.conversation.messages.isEmpty)
+                    .disabled(model.conversation.messages.isEmpty || model.conversation.isResponding)
                     .accessibilityLabel("Новый диалог")
                 }
             }
             .safeAreaInset(edge: .bottom) { composer }
             .animation(.spring(response: 0.42, dampingFraction: 0.86), value: model.conversation.messages.count)
+            .task { await model.load() }
+            .sheet(isPresented: $showsHistory) {
+                ChatHistoryView(model: model)
+            }
+            .sheet(isPresented: $showsSettings) {
+                ProviderSettingsView(model: model)
+            }
+            .onChange(of: model.requiresProviderSettings) { _, required in
+                guard required else { return }
+                showsSettings = true
+                model.requiresProviderSettings = false
+            }
+            .alert("Ошибка", isPresented: errorBinding) {
+                Button("Закрыть") { model.errorMessage = nil }
+            } message: {
+                Text(model.errorMessage ?? "Неизвестная ошибка")
+            }
         }
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding(
+            get: { model.errorMessage != nil },
+            set: { if !$0 { model.errorMessage = nil } }
+        )
     }
 
     private var emptyState: some View {
@@ -226,6 +158,14 @@ private struct ChatScreen: View {
                         Divider().overlay(BaselineTheme.line)
                     }
                 }
+            }
+            if model.selectedProvider == nil {
+                Button("Настроить Responses API") {
+                    showsSettings = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(BaselineTheme.accent)
+                .foregroundStyle(BaselineTheme.shell)
             }
             Spacer(minLength: 20)
         }
