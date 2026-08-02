@@ -3,7 +3,7 @@ import Foundation
 import GRDB
 
 public actor AthleteStore {
-    private let database: DatabaseQueue
+    let database: DatabaseQueue
 
     public init(path: String) throws {
         database = try DatabaseQueue(path: path)
@@ -147,6 +147,9 @@ public actor AthleteStore {
 
 public enum AthleteStoreError: Error, Equatable, Sendable {
     case invalidVerificationStatus(String)
+    case invalidIdentifier(String)
+    case invalidChatRole(String)
+    case providerNotFound(UUID)
 }
 
 private extension MemoryDocument {

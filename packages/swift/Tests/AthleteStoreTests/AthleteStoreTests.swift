@@ -49,8 +49,66 @@ func createsRequiredTables() async throws {
         "analysis_artifacts", "memory_documents", "memory_claim_index",
         "memory_dependencies", "analysis_jobs", "agent_runs", "user_corrections",
         "goals", "plan_events", "experiment_events", "consent_grants",
-        "provider_configurations", "memory_search",
+        "provider_configurations", "chat_threads", "chat_messages", "memory_search",
     ]))
+}
+
+@Test("История возвращает диалоги по последней активности и сообщения по порядку")
+func storesChatHistory() async throws {
+    let store = try AthleteStore.inMemory()
+    let first = try await store.createChat(title: "Первая тренировка", at: Date(timeIntervalSince1970: 100))
+    let second = try await store.createChat(title: "Вторая тренировка", at: Date(timeIntervalSince1970: 200))
+
+    try await store.appendChatMessage(
+        ChatHistoryMessage(threadID: first.id, role: .user, text: "Как прошёл подход?", createdAt: Date(timeIntervalSince1970: 300))
+    )
+    try await store.appendChatMessage(
+        ChatHistoryMessage(threadID: first.id, role: .assistant, text: "Темп был ровным.", createdAt: Date(timeIntervalSince1970: 301))
+    )
+
+    #expect(try await store.chatThreads().map(\.id) == [first.id, second.id])
+    let messages = try await store.chatMessages(threadID: first.id)
+    #expect(messages.map(\.role) == [.user, .assistant])
+    #expect(messages.map(\.text) == ["Как прошёл подход?", "Темп был ровным."])
+}
+
+@Test("Удаление диалога удаляет его сообщения")
+func deletesChatHistory() async throws {
+    let store = try AthleteStore.inMemory()
+    let thread = try await store.createChat(title: "Техника", at: Date(timeIntervalSince1970: 100))
+    try await store.appendChatMessage(
+        ChatHistoryMessage(threadID: thread.id, role: .user, text: "Проверь технику", createdAt: Date(timeIntervalSince1970: 101))
+    )
+
+    try await store.deleteChat(id: thread.id)
+
+    #expect(try await store.chatThreads().isEmpty)
+    #expect(try await store.chatMessages(threadID: thread.id).isEmpty)
+}
+
+@Test("Выбранным может быть только один Responses API провайдер")
+func selectsSingleProvider() async throws {
+    let store = try AthleteStore.inMemory()
+    let openAI = ProviderConfiguration(
+        name: "OpenAI",
+        baseURL: "https://api.openai.com/v1",
+        model: "gpt-5.6",
+        isSelected: true
+    )
+    let relay = ProviderConfiguration(
+        name: "Relay",
+        baseURL: "https://llm.example.com/v1",
+        model: "gpt-5.6-terra"
+    )
+
+    try await store.saveProviderConfiguration(openAI)
+    try await store.saveProviderConfiguration(relay)
+    try await store.selectProvider(id: relay.id)
+
+    let configurations = try await store.providerConfigurations()
+    #expect(configurations.first(where: { $0.id == openAI.id })?.isSelected == false)
+    #expect(configurations.first(where: { $0.id == relay.id })?.isSelected == true)
+    #expect(try await store.selectedProviderConfiguration()?.id == relay.id)
 }
 
 private func makeEvidence(id: UUID) -> EvidenceEnvelope {

@@ -68,6 +68,22 @@ extension AthleteStore {
             try Self.createPayloadTable("consent_grants", in: db)
             try Self.createPayloadTable("provider_configurations", in: db)
         }
+        migrator.registerMigration("v2_chat_history") { db in
+            try db.create(table: "chat_threads") { table in
+                table.column("id", .text).primaryKey()
+                table.column("title", .text).notNull()
+                table.column("created_at", .datetime).notNull()
+                table.column("updated_at", .datetime).notNull().indexed()
+            }
+            try db.create(table: "chat_messages") { table in
+                table.column("id", .text).primaryKey()
+                table.column("thread_id", .text).notNull().indexed()
+                    .references("chat_threads", onDelete: .cascade)
+                table.column("role", .text).notNull()
+                table.column("text", .text).notNull()
+                table.column("created_at", .datetime).notNull().indexed()
+            }
+        }
         return migrator
     }
 
