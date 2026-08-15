@@ -152,7 +152,7 @@ actor LocalDeviceServices {
         return LocalFeedbackResponse(stored: stored, personalizationSamples: model.samples)
     }
 
-    func sendRecommendationReward(feedbackContextID: UUID, reward: Double, context: PersonalizationContext) async throws -> LocalFeedbackResponse {
+    func sendRecommendationReward(feedbackContextID: UUID, reward: Double) async throws -> LocalFeedbackResponse {
         guard let store else { throw LocalStorageError.unavailable }
         guard let storedExposure = try await store.recommendationExposure(id: feedbackContextID) else { throw AthleteStoreError.invalidIdentifier(feedbackContextID.uuidString) }
         let exposure = try JSONDecoder().decode(RecommendationExposure.self, from: storedExposure.payload)

@@ -82,8 +82,7 @@ final class ChatModel {
         do {
             _ = try await localServices.sendRecommendationReward(
                 feedbackContextID: feedbackContextID,
-                reward: Double(value),
-                context: feedbackContext
+                reward: Double(value)
             )
         } catch {
             messages[index].rating = nil

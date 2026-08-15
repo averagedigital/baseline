@@ -73,10 +73,3 @@ public struct UnavailableCoachGenerator: CoachGenerating {
     public init() {}
     public func generate(request: CoachGenerationRequest) async throws -> CoachOutput { throw CoachGenerationError.unavailable }
 }
-
-public struct FoundationModelsCoachGenerator: CoachGenerating {
-    public init() {}
-    public func generate(request: CoachGenerationRequest) async throws -> CoachOutput {
-        throw CoachGenerationError.unavailable
-    }
-}
