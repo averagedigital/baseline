@@ -1,4 +1,5 @@
 import AthleteCore
+import AthleteIntelligence
 import AthleteNutrition
 import AthletePersonalization
 import AthleteSensors
@@ -89,7 +90,54 @@ actor LocalDeviceServices {
         return LocalFoodAnalysis(containsFood: true, stored: true, duplicateOf: nil, observationID: observationID, confidence: items.map(\.labelConfidence).min() ?? 0, caloriesLow: nil, caloriesHigh: nil, items: items)
     }
 
-    func chat(threadID: UUID?, message: String) async throws -> LocalChatResponse { throw LocalCoachError.unavailable }
+    func chat(threadID: UUID?, message: String) async throws -> LocalChatResponse {
+        guard let store else { throw LocalStorageError.unavailable }
+        let generator = FoundationModelsCoachAdapter()
+        guard generator.availability == .available else { throw LocalCoachError.unavailable }
+        let thread: UUID
+        if let threadID {
+            guard try await store.chatThreads().contains(where: { $0.id == threadID }) else { throw AthleteStoreError.invalidIdentifier(threadID.uuidString) }
+            thread = threadID
+        } else {
+            thread = try await store.createChat(title: String(message.prefix(48))).id
+        }
+        try await store.appendChatMessage(ChatHistoryMessage(threadID: thread, role: .user, text: message))
+        let facts = try await coachFacts(store: store)
+        let request = CoachGenerationRequest(prompt: message, facts: facts)
+        var output: CoachOutput
+        do {
+            output = try await generator.generate(request: request)
+            try GroundingValidator().validate(output, facts: facts)
+        } catch {
+            let repaired = try await generator.generate(request: CoachGenerationRequest(prompt: "Repair the previous JSON using only these facts. User request: \(message)", facts: facts))
+            try GroundingValidator().validate(repaired, facts: facts)
+            output = repaired
+        }
+        let answer = output.claims.map(\.text).joined(separator: "\n\n")
+        try await store.appendChatMessage(ChatHistoryMessage(threadID: thread, role: .assistant, text: answer))
+        let action = output.recommendationAction.flatMap(CoachingAction.init(rawValue:))
+        var exposureID: UUID?
+        if let action, let session = try await store.latestEvidence(kind: "activity.session.v2") {
+            let features = try await PersonalizationFeatureBuilder(store: store).features(for: session.id)
+            let exposure = RecommendationExposure(action: action, features: features, contextDigest: session.contentDigest)
+            try await store.saveRecommendationExposure(StoredRecommendationExposure(id: exposure.id, payload: JSONEncoder().encode(exposure), createdAt: exposure.createdAt))
+            exposureID = exposure.id
+        }
+        return LocalChatResponse(threadID: thread, answerMarkdown: answer, recommendationCategory: action?.rawValue ?? "none", evidenceIDs: facts.compactMap { UUID(uuidString: $0.id) }, foodIDs: [], contextDigest: "local", feedbackContextID: exposureID)
+    }
+
+    private func coachFacts(store: AthleteStore) async throws -> [GroundedFact] {
+        guard let envelope = try await store.latestEvidence(kind: "activity.session.v2"), let session = try await store.payload(for: envelope.id, as: SessionEvidenceV2.self) else { return [] }
+        var facts = [
+            GroundedFact(id: envelope.id.uuidString, value: "session", numericValue: nil),
+            GroundedFact(id: "active_minutes", value: String(format: "%.1f", session.activeTime / 60), numericValue: session.activeTime / 60),
+            GroundedFact(id: "active_blocks", value: "\(session.activeBlockCount)", numericValue: Double(session.activeBlockCount)),
+            GroundedFact(id: "rest_minutes", value: String(format: "%.1f", session.restTime / 60), numericValue: session.restTime / 60),
+            GroundedFact(id: "tracking_coverage", value: String(format: "%.2f", session.trackingCoverage), numericValue: session.trackingCoverage),
+        ]
+        facts.append(GroundedFact(id: "timeline", value: session.segments.prefix(100).map { "\($0.state.rawValue) \($0.startOffset)-\($0.endOffset)" }.joined(separator: "; ")))
+        return facts
+    }
 
     func sendSessionRPE(eventID: UUID, value: Double, sourceEvidenceID: UUID, note: String) async throws -> LocalFeedbackResponse {
         guard let store else { throw LocalStorageError.unavailable }

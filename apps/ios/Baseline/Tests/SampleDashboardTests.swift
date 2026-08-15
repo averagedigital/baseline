@@ -70,7 +70,7 @@ func decodesFoodRange() throws {
     #expect(value.containsFood)
     #expect(value.caloriesLow == 410)
     #expect(value.caloriesHigh == 650)
-    #expect(value.caloriesLow < value.caloriesHigh)
+    #expect(value.caloriesLow! < value.caloriesHigh!)
 }
 
 @Test("RPE feedback сохраняет ссылку на конкретную session evidence")

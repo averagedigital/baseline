@@ -48,7 +48,7 @@ public struct CoachOutput: Codable, Equatable, Sendable {
     public init(claims: [CoachClaim], recommendationAction: String? = nil) { self.claims = claims; self.recommendationAction = recommendationAction }
 }
 
-public struct CoachGenerationRequest: Sendable { public let prompt: String; public let facts: [GroundedFact] }
+public struct CoachGenerationRequest: Sendable { public let prompt: String; public let facts: [GroundedFact]; public init(prompt: String, facts: [GroundedFact]) { self.prompt = prompt; self.facts = facts } }
 public protocol CoachGenerating: Sendable { func generate(request: CoachGenerationRequest) async throws -> CoachOutput }
 
 public enum GroundingError: Error, Equatable { case unknownFact(String); case numericMismatch(String); case missingNumericFact(String) }
