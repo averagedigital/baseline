@@ -227,7 +227,7 @@ private struct SettingsSheet: View {
                 Section("Приватность") {
                     Label("Видео не записывается", systemImage: "video.slash")
                     Label("Session evidence хранится локально", systemImage: "waveform.path.ecg")
-                    Label("JPEG еды отправляется после локального gate и не хранится", systemImage: "fork.knife")
+                    Label("Изображения камеры обрабатываются только в памяти и не сохраняются", systemImage: "fork.knife")
                 }
 
                 Section("Архитектура") {

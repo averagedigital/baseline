@@ -55,7 +55,7 @@ actor LocalDeviceServices {
         if let evidence, let payload = try await store.payload(for: evidence.id, as: SessionEvidenceV2.self) {
             session = LocalLatestSession(id: evidence.id, observedTo: payload.observedTo, trackingCoverage: payload.trackingCoverage, activeTime: payload.activeTime, restTime: payload.restTime, trackingGapTime: payload.trackingGapTime, setCount: payload.activeBlockCount)
         } else { session = nil }
-        let latestFood = try await store.recentFoodObservations(limit: 1).first.flatMap { observation in
+        let latestFood = try await store.recentFoodObservations(limit: 20).first(where: { !$0.dismissed }).flatMap { observation in
             try? JSONDecoder().decode(LocalLatestFood.self, from: observation.payload)
         }
         let state = try await store.loadPersonalizationState(as: PersonalizationState.self) ?? PersonalizationState()
@@ -128,13 +128,13 @@ actor LocalDeviceServices {
 
     private func coachFacts(store: AthleteStore) async throws -> [GroundedFact] {
         guard let envelope = try await store.latestEvidence(kind: "activity.session.v2"), let session = try await store.payload(for: envelope.id, as: SessionEvidenceV2.self) else { return [] }
-        var facts = [
+        var facts = CoachContextAssembler().assemble(session: SessionFacts(activeMinutes: session.activeTime / 60, activeBlocks: session.activeBlockCount, coverage: session.trackingCoverage), personalization: nil, food: nil).facts
+        facts.append(contentsOf: [
             GroundedFact(id: envelope.id.uuidString, value: "session", numericValue: nil),
-            GroundedFact(id: "active_minutes", value: String(format: "%.1f", session.activeTime / 60), numericValue: session.activeTime / 60),
-            GroundedFact(id: "active_blocks", value: "\(session.activeBlockCount)", numericValue: Double(session.activeBlockCount)),
             GroundedFact(id: "rest_minutes", value: String(format: "%.1f", session.restTime / 60), numericValue: session.restTime / 60),
-            GroundedFact(id: "tracking_coverage", value: String(format: "%.2f", session.trackingCoverage), numericValue: session.trackingCoverage),
-        ]
+            GroundedFact(id: "tracking_gaps_minutes", value: String(format: "%.1f", session.trackingGapTime / 60), numericValue: session.trackingGapTime / 60),
+            GroundedFact(id: "capture_quality", value: "ambiguous=\(session.captureQuality.ambiguousFrameCount), identity=\(session.captureQuality.identityDiscontinuityCount), warmup=\(session.captureQuality.warmupFrameCount)"),
+        ])
         facts.append(GroundedFact(id: "timeline", value: session.segments.prefix(100).map { "\($0.state.rawValue) \($0.startOffset)-\($0.endOffset)" }.joined(separator: "; ")))
         return facts
     }
