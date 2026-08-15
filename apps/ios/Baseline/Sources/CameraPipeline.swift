@@ -1,8 +1,7 @@
 @preconcurrency import AVFoundation
 import AthleteSensors
+import AthleteNutrition
 import CoreImage
-import ImageIO
-import UIKit
 import Vision
 
 enum CaptureCameraPosition: Sendable, Equatable {
@@ -22,14 +21,14 @@ enum CaptureCameraPosition: Sendable, Equatable {
 final class CameraPipeline: NSObject, @unchecked Sendable {
     let session = AVCaptureSession()
     var onFrame: (@Sendable (PoseFrame) -> Void)?
-    var onFoodCandidate: (@Sendable (Data, Date) -> Void)?
+    var onFoodCandidate: (@Sendable ([FoodDetection], Date) -> Void)?
     var onError: (@Sendable (String) -> Void)?
 
     private let queue = DispatchQueue(label: "org.averagedigital.baseline.camera", qos: .userInitiated)
     private let foodQueue = DispatchQueue(label: "org.averagedigital.baseline.food-gate", qos: .utility)
     private let output = AVCaptureVideoDataOutput()
     private let bodyRequest = VNDetectHumanBodyPoseRequest()
-    private let ciContext = CIContext(options: [.cacheIntermediates: false])
+    private let foodDetector = FoodObjectDetector()
     private var tracker = PrimarySubjectTracker()
     private var smoother = PoseSmoother(alpha: 0.24)
     private var foodGate = FoodFrameGate()
@@ -41,7 +40,8 @@ final class CameraPipeline: NSObject, @unchecked Sendable {
     private var lastDisplaySamples: [PoseSample] = []
     private var lastDisplayBox: NormalizedPoseRect?
     private var foodScanEnabled = true
-    private var foodClassificationInFlight = false
+    private var foodDetectionInFlight = false
+    private var foodTracker = FoodDetectionTracker()
 
     func start() async throws {
         try await withCheckedThrowingContinuation { continuation in
@@ -175,8 +175,8 @@ extension CameraPipeline: AVCaptureVideoDataOutputSampleBufferDelegate {
             lastPoseTimestamp = timestamp
             processPose(pixelBuffer: pixelBuffer, timestamp: timestamp)
         }
-        if foodScanEnabled, !foodClassificationInFlight, foodGate.shouldEvaluate(at: timestamp) {
-            foodClassificationInFlight = true
+        if foodScanEnabled, !foodDetectionInFlight, foodGate.shouldEvaluate(at: timestamp) {
+            foodDetectionInFlight = true
             processFoodGate(pixelBuffer: pixelBuffer, timestamp: timestamp)
         }
     }
@@ -233,28 +233,21 @@ extension CameraPipeline: AVCaptureVideoDataOutputSampleBufferDelegate {
         let box = PixelBufferBox(pixelBuffer)
         foodQueue.async { [weak self] in
             guard let self else { return }
-            let labels: [FoodLabelObservation]
+            let detections: [FoodDetection]
             do {
-                let request = VNClassifyImageRequest()
-                try VNImageRequestHandler(cvPixelBuffer: box.value, orientation: .up, options: [:])
-                    .perform([request])
-                labels = (request.results ?? []).map {
-                    FoodLabelObservation(identifier: $0.identifier, confidence: Double($0.confidence))
-                }
+                detections = try self.foodDetector.detect(pixelBuffer: box.value)
             } catch {
-                labels = []
+                detections = []
             }
 
             self.queue.async { [weak self] in
                 guard let self else { return }
-                self.foodClassificationInFlight = false
-                guard self.foodScanEnabled, self.foodGate.consume(observations: labels, at: timestamp) else {
+                self.foodDetectionInFlight = false
+                let tracked = self.foodTracker.update(detections, at: timestamp)
+                guard self.foodScanEnabled, self.foodGate.consume(observations: tracked.map { FoodDetection(id: $0.id, label: $0.label, confidence: $0.confidence, boundingBox: $0.boundingBox) }, at: timestamp) else {
                     return
                 }
-                self.foodQueue.async { [weak self] in
-                    guard let self, let jpeg = self.makeJPEG(pixelBuffer: box.value) else { return }
-                    self.onFoodCandidate?(jpeg, Date())
-                }
+                self.onFoodCandidate?(tracked.map { FoodDetection(id: $0.id, label: $0.label, confidence: $0.confidence, boundingBox: $0.boundingBox) }, Date())
             }
         }
     }
@@ -273,18 +266,6 @@ extension CameraPipeline: AVCaptureVideoDataOutputSampleBufferDelegate {
             )
         }
         return PoseCandidate(samples: samples)
-    }
-
-    private func makeJPEG(pixelBuffer: CVPixelBuffer) -> Data? {
-        let source = CIImage(cvPixelBuffer: pixelBuffer)
-        guard let cgImage = ciContext.createCGImage(source, from: source.extent) else { return nil }
-        let image = UIImage(cgImage: cgImage)
-        let maximumDimension: CGFloat = 768
-        let scale = min(1, maximumDimension / max(image.size.width, image.size.height))
-        let target = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-        let renderer = UIGraphicsImageRenderer(size: target)
-        let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }
-        return resized.jpegData(compressionQuality: 0.72)
     }
 
     private var jointMap: [(PoseJoint, VNHumanBodyPoseObservation.JointName)] {

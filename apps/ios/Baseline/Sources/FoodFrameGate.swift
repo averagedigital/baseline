@@ -1,9 +1,5 @@
 import Foundation
-
-struct FoodLabelObservation: Equatable, Sendable {
-    let identifier: String
-    let confidence: Double
-}
+import AthleteNutrition
 
 struct FoodFrameGate: Sendable {
     private let evaluationInterval: TimeInterval
@@ -30,14 +26,10 @@ struct FoodFrameGate: Sendable {
     }
 
     mutating func consume(
-        observations: [FoodLabelObservation],
+        observations: [FoodDetection],
         at timestamp: TimeInterval
     ) -> Bool {
-        let isPositive = observations.prefix(12).contains { observation in
-            observation.confidence >= 0.10 && Self.foodKeywords.contains { keyword in
-                observation.identifier.localizedCaseInsensitiveContains(keyword)
-            }
-        }
+        let isPositive = observations.prefix(12).contains { $0.confidence >= 0.45 }
         positiveFrames = isPositive ? positiveFrames + 1 : 0
         guard positiveFrames >= requiredPositiveFrames,
               timestamp - lastUploadAt >= uploadCooldown else { return false }
@@ -51,10 +43,4 @@ struct FoodFrameGate: Sendable {
         lastUploadAt = -.infinity
         positiveFrames = 0
     }
-
-    private static let foodKeywords = [
-        "food", "dish", "plate", "meal", "breakfast", "lunch", "dinner",
-        "salad", "rice", "pasta", "pizza", "sandwich", "bread", "soup",
-        "fruit", "vegetable", "meat", "chicken", "fish", "dessert", "bowl",
-    ]
 }

@@ -6,6 +6,12 @@ public struct SessionActivitySegment: Codable, Equatable, Sendable {
     public let state: ActivitySegmentState
     public let startOffset: TimeInterval
     public let endOffset: TimeInterval
+
+    public init(state: ActivitySegmentState, startOffset: TimeInterval, endOffset: TimeInterval) {
+        self.state = state
+        self.startOffset = startOffset
+        self.endOffset = endOffset
+    }
 }
 
 public struct SessionEvidence: Codable, Equatable, Sendable {

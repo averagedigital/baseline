@@ -73,7 +73,7 @@ public struct FoodDetectionTracker: Sendable {
     public mutating func update(_ detections: [FoodDetection], at timestamp: TimeInterval) -> [TrackedFoodObject] {
         var matched = Set<UUID>()
         for detection in detections where detection.confidence >= minimumConfidence {
-            let candidate = tracks.values.filter { $0.label == detection.label && $0.boundingBox.iou(with: detection.boundingBox) >= 0.1 }.min { $0.boundingBox.centerDistance(to: detection.boundingBox) < $1.boundingBox.centerDistance(to: detection.boundingBox) }
+            let candidate = tracks.values.filter { !matched.contains($0.id) && $0.label == detection.label && $0.boundingBox.iou(with: detection.boundingBox) >= 0.1 }.min { $0.boundingBox.centerDistance(to: detection.boundingBox) < $1.boundingBox.centerDistance(to: detection.boundingBox) }
             if let candidate {
                 var track = candidate; matched.insert(track.id); track.boundingBox = track.boundingBox.ema(with: detection.boundingBox, alpha: 0.35); track.confidence = 0.65 * track.confidence + 0.35 * detection.confidence; track.hitCount += 1; track.missCount = 0; track.lastSeenAt = timestamp; tracks[track.id] = track
             } else {

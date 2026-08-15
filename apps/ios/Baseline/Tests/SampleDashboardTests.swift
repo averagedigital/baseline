@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import AthleteNutrition
 @testable import Baseline
 
 @Test("История интенсивности ограничена временем, а не числом кадров")
@@ -37,7 +38,7 @@ func throttlesFoodClassification() {
 @Test("Food gate требует два последовательных положительных кадра")
 func requiresConsecutiveFoodSignals() {
     var gate = FoodFrameGate(evaluationInterval: 0.1, uploadCooldown: 20, requiredPositiveFrames: 2)
-    let food = [FoodLabelObservation(identifier: "plate of pasta", confidence: 0.8)]
+    let food = [FoodDetection(label: "plate of pasta", confidence: 0.8, boundingBox: NormalizedFoodRect(x: 0.1, y: 0.1, width: 0.5, height: 0.5))]
 
     let first = gate.consume(observations: food, at: 0)
     let second = gate.consume(observations: food, at: 1)

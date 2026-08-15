@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import AthleteSensors
 import AthleteStore
+import AthleteNutrition
 import Observation
 import SwiftUI
 
@@ -96,29 +97,31 @@ final class CameraModel {
     init(
         pipeline: CameraPipeline = CameraPipeline(),
         store: AthleteStore? = nil,
-        localServices: LocalDeviceServices = LocalDeviceServices()
+        localServices: LocalDeviceServices? = nil
     ) {
         self.pipeline = pipeline
-        self.localServices = localServices
+        let resolvedStore: AthleteStore?
         if let store {
-            self.store = store
+            resolvedStore = store
         } else {
             do {
-                self.store = try StoreFactory.open()
+                resolvedStore = try StoreFactory.open()
             } catch {
-                self.store = nil
+                resolvedStore = nil
                 errorMessage = "Не удалось открыть локальное хранилище."
             }
         }
+        self.store = resolvedStore
+        self.localServices = localServices ?? LocalDeviceServices(store: resolvedStore)
 
         pipeline.onFrame = { [weak self] frame in
             Task { @MainActor in
                 self?.consume(frame)
             }
         }
-        pipeline.onFoodCandidate = { [weak self] jpeg, capturedAt in
+        pipeline.onFoodCandidate = { [weak self] detections, capturedAt in
             Task { @MainActor in
-                await self?.analyzeFood(jpeg: jpeg, capturedAt: capturedAt)
+                await self?.analyzeFood(detections: detections, capturedAt: capturedAt)
             }
         }
         pipeline.onError = { [weak self] message in
@@ -249,19 +252,23 @@ final class CameraModel {
             let summary = try ActivitySegmenter(configuration: .cameraV2).segment(windows)
             let endedAt = Date()
             let interval = DateInterval(start: startedAt, end: endedAt)
-            let session = SessionEvidenceBuilder(algorithmVersion: "activity-segmentation-v2")
-                .make(interval: interval, summary: summary)
+            let session = SessionEvidenceV2(
+                observedFrom: interval.start,
+                observedTo: interval.end,
+                trackingCoverage: summary.coverage,
+                activeTime: summary.activeTime,
+                restTime: summary.restTime,
+                trackingGapTime: summary.trackingGapTime,
+                activeBlockCount: summary.setCount,
+                confirmedSetCount: nil,
+                segments: summary.segments.map { SessionActivitySegment(state: $0.state, startOffset: $0.start, endOffset: $0.end) },
+                captureQuality: SessionCaptureQuality(trackingGapCount: summary.segments.filter { $0.state == .trackingGap }.count),
+                algorithmVersion: "activity-segmentation-v2"
+            )
             let envelope = try session.envelope(ingestedAt: endedAt)
 
             if let store {
                 try await store.appendEvidence(envelope, payload: session)
-            }
-
-            var localError: Error?
-            do {
-                try await localServices.uploadEvidence(envelope: envelope, payload: session)
-            } catch {
-                localError = error
             }
 
             let viewData = SessionSummaryViewData(
@@ -289,9 +296,6 @@ final class CameraModel {
                 summary: viewData
             )
             await refreshHome()
-            if let localError {
-                errorMessage = "Тренировка сохранена локально, но localServices пока недоступен: \(localError.localizedDescription)"
-            }
         } catch {
             errorMessage = "Не удалось сохранить тренировку: \(error.localizedDescription)"
         }
@@ -388,6 +392,7 @@ final class CameraModel {
             normalizedJointVelocity: metrics.isValid ? metrics.normalizedJointVelocity : 0,
             movingJointFraction: metrics.isValid ? metrics.movingJointFraction : 0,
             boundingBoxMotion: metrics.isValid ? metrics.boundingBoxMotion : 0,
+            motionScore: metrics.isValid ? metrics.segmentationMotionScore : 0,
             trackingAvailable: metrics.isValid
         ))
 
@@ -399,13 +404,13 @@ final class CameraModel {
         }
     }
 
-    private func analyzeFood(jpeg: Data, capturedAt: Date) async {
+    private func analyzeFood(detections: [FoodDetection], capturedAt: Date) async {
         guard foodScanEnabled, !foodRequestInFlight else { return }
         foodRequestInFlight = true
         foodPhase = .analyzing
         defer { foodRequestInFlight = false }
         do {
-            let result = try await localServices.analyzeFood(jpeg: jpeg, capturedAt: capturedAt)
+            let result = try await localServices.analyzeFood(detections: detections, capturedAt: capturedAt)
             if result.containsFood {
                 latestFood = result
                 foodPhase = .watching
@@ -540,7 +545,7 @@ struct CameraCard: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text("Подходы")
+                    Text("Активные блоки")
                         .font(.caption)
                         .foregroundStyle(BaselineTheme.secondary)
                     Text("\(model.liveSetCount)")
@@ -614,7 +619,7 @@ struct LatestFoodCard: View {
             } else {
                 Text(model.latestFoodTitle)
                     .font(.system(size: 15, weight: .medium))
-                Text("Кадры отправляются только после двух последовательных food-сигналов; исходные изображения не сохраняются.")
+                Text("Изображения камеры обрабатываются в памяти и не сохраняются.")
                     .font(.caption)
                     .foregroundStyle(BaselineTheme.secondary)
             }
@@ -646,7 +651,7 @@ struct HomeInsightCard: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if let session = model.lastSession {
-                Text("Последняя тренировка: \(session.setCount) подходов, \(Int(session.activeMinutes.rounded())) мин активности, покрытие \(Int((session.trackingCoverage * 100).rounded()))%.")
+                Text("Последняя тренировка: \(session.setCount) активных блоков, \(Int(session.activeMinutes.rounded())) мин активности, покрытие \(Int((session.trackingCoverage * 100).rounded()))%.")
                     .font(.subheadline)
                     .foregroundStyle(BaselineTheme.secondary)
             } else {

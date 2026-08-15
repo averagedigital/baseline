@@ -46,8 +46,9 @@ struct AppShell: View {
         .sheet(item: $bindableModel.pendingFeedback) { feedback in
             SessionFeedbackSheet(feedback: feedback) { value, note in
                 await model.submitRPE(value, note: note, for: feedback)
+            } onSkip: {
+                model.pendingFeedback = nil
             }
-            .interactiveDismissDisabled()
         }
         .alert("Baseline", isPresented: errorBinding) {
             Button("Закрыть") { model.errorMessage = nil }
@@ -118,6 +119,7 @@ private struct SessionFeedbackSheet: View {
     @Environment(\.dismiss) private var dismiss
     let feedback: PendingSessionFeedback
     let submit: (Double, String) async -> Bool
+    let onSkip: () -> Void
 
     @State private var rpe = 7.0
     @State private var note = ""
@@ -129,7 +131,7 @@ private struct SessionFeedbackSheet: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Как ощущалась тренировка?")
                         .font(.system(size: 28, weight: .semibold, design: .rounded))
-                    Text("Явный RPE обучает только вашу калибровку сложности. Измеренные подходы и время он не переписывает.")
+                    Text("Явный RPE обучает только локальную калибровку сложности. Активные блоки и время он не переписывает.")
                         .font(.subheadline)
                         .foregroundStyle(BaselineTheme.secondary)
                         .lineSpacing(3)
@@ -182,6 +184,14 @@ private struct SessionFeedbackSheet: View {
                 }
                 .buttonStyle(BaselinePrimaryButtonStyle())
                 .disabled(isSubmitting)
+
+                Button("Пропустить") {
+                    onSkip()
+                    dismiss()
+                }
+                    .frame(maxWidth: .infinity)
+                    .foregroundStyle(BaselineTheme.secondary)
+                    .disabled(isSubmitting)
             }
             .padding(20)
             .baselinePage()
