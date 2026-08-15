@@ -207,7 +207,6 @@ public enum AthleteStoreError: Error, Equatable, Sendable {
     case invalidVerificationStatus(String)
     case invalidIdentifier(String)
     case invalidChatRole(String)
-    case providerNotFound(UUID)
 }
 
 private extension MemoryDocument {

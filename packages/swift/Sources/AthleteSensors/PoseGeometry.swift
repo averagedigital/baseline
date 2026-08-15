@@ -76,11 +76,13 @@ public struct PoseCandidate: Equatable, Sendable {
     public let samples: [PoseSample]
     public let boundingBox: NormalizedPoseRect
     public let averageConfidence: Double
+    public let appearanceSignature: AppearanceSignature?
 
-    public init(samples: [PoseSample], boundingBox: NormalizedPoseRect, averageConfidence: Double) {
+    public init(samples: [PoseSample], boundingBox: NormalizedPoseRect, averageConfidence: Double, appearanceSignature: AppearanceSignature? = nil) {
         self.samples = samples
         self.boundingBox = boundingBox
         self.averageConfidence = averageConfidence
+        self.appearanceSignature = appearanceSignature
     }
 
     public init?(samples: [PoseSample], minimumConfidence: Double = 0.2) {
@@ -226,6 +228,7 @@ public struct PrimarySubjectTrackerConfiguration: Equatable, Sendable {
     public let maximumCenterDistance: Double
     public let maximumPoseDistance: Double
     public let maximumHoldFrames: Int
+    public let appearanceDistanceGate: Double
 
     public init(
         acquisitionFrames: Int = 5,
@@ -234,6 +237,7 @@ public struct PrimarySubjectTrackerConfiguration: Equatable, Sendable {
         maximumCenterDistance: Double = 1.25,
         maximumPoseDistance: Double = 0.8,
         maximumHoldFrames: Int = 18
+        , appearanceDistanceGate: Double = 0.45
     ) {
         self.acquisitionFrames = max(1, acquisitionFrames)
         self.ambiguityMargin = max(0, ambiguityMargin)
@@ -241,6 +245,7 @@ public struct PrimarySubjectTrackerConfiguration: Equatable, Sendable {
         self.maximumCenterDistance = max(0.1, maximumCenterDistance)
         self.maximumPoseDistance = max(0.1, maximumPoseDistance)
         self.maximumHoldFrames = max(1, maximumHoldFrames)
+        self.appearanceDistanceGate = max(0, appearanceDistanceGate)
     }
 }
 
@@ -273,9 +278,11 @@ public struct PrimarySubjectTracker: Sendable {
     private var pendingCandidate: PoseCandidate?
     private var pendingFrames = 0
     private var holdFrames = 0
+    private let appearanceComparator: any AppearanceComparing
 
-    public init(configuration: PrimarySubjectTrackerConfiguration = .init()) {
+    public init(configuration: PrimarySubjectTrackerConfiguration = .init(), appearanceComparator: any AppearanceComparing = EuclideanAppearanceComparator()) {
         self.configuration = configuration
+        self.appearanceComparator = appearanceComparator
     }
 
     public mutating func reset() {
@@ -430,6 +437,8 @@ public struct PrimarySubjectTracker: Sendable {
         if let distance = poseDistance(candidate, previous), distance > configuration.maximumPoseDistance {
             return false
         }
+        if let lhs = candidate.appearanceSignature, let rhs = previous.appearanceSignature,
+           appearanceComparator.distance(lhs, rhs) > configuration.appearanceDistanceGate { return false }
         return true
     }
 
@@ -447,7 +456,11 @@ public struct PrimarySubjectTracker: Sendable {
         } else {
             poseScore = 0.45
         }
-        return 0.34 * iou + 0.25 * centerScore + 0.31 * poseScore + 0.10 * candidate.averageConfidence
+        let appearanceScore: Double
+        if let lhs = candidate.appearanceSignature, let rhs = previous.appearanceSignature {
+            appearanceScore = 1 - min(appearanceComparator.distance(lhs, rhs) / max(configuration.appearanceDistanceGate, 0.001), 1)
+        } else { appearanceScore = 0.5 }
+        return 0.30 * iou + 0.22 * centerScore + 0.28 * poseScore + 0.10 * candidate.averageConfidence + 0.10 * appearanceScore
     }
 
     private func poseDistance(_ left: PoseCandidate, _ right: PoseCandidate) -> Double? {

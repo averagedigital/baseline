@@ -89,31 +89,6 @@ func deletesChatHistory() async throws {
     #expect(try await store.chatMessages(threadID: thread.id).isEmpty)
 }
 
-@Test("Выбранным может быть только один Responses API провайдер")
-func selectsSingleProvider() async throws {
-    let store = try AthleteStore.inMemory()
-    let openAI = ProviderConfiguration(
-        name: "OpenAI",
-        baseURL: "https://api.openai.com/v1",
-        model: "gpt-5.6",
-        isSelected: true
-    )
-    let relay = ProviderConfiguration(
-        name: "Relay",
-        baseURL: "https://llm.example.com/v1",
-        model: "gpt-5.6-terra"
-    )
-
-    try await store.saveProviderConfiguration(openAI)
-    try await store.saveProviderConfiguration(relay)
-    try await store.selectProvider(id: relay.id)
-
-    let configurations = try await store.providerConfigurations()
-    #expect(configurations.first(where: { $0.id == openAI.id })?.isSelected == false)
-    #expect(configurations.first(where: { $0.id == relay.id })?.isSelected == true)
-    #expect(try await store.selectedProviderConfiguration()?.id == relay.id)
-}
-
 private func makeEvidence(id: UUID) -> EvidenceEnvelope {
     EvidenceEnvelope(
         id: id,

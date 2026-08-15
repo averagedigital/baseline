@@ -53,28 +53,6 @@ public struct ChatHistoryMessage: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-public struct ProviderConfiguration: Codable, Equatable, Identifiable, Sendable {
-    public let id: UUID
-    public var name: String
-    public var baseURL: String
-    public var model: String
-    public var isSelected: Bool
-
-    public init(
-        id: UUID = UUID(),
-        name: String,
-        baseURL: String,
-        model: String,
-        isSelected: Bool = false
-    ) {
-        self.id = id
-        self.name = name
-        self.baseURL = baseURL
-        self.model = model
-        self.isSelected = isSelected
-    }
-}
-
 extension AthleteStore {
     public func createChat(title: String, at date: Date = Date()) throws -> ChatThread {
         let thread = ChatThread(title: title, createdAt: date, updatedAt: date)
@@ -150,45 +128,6 @@ extension AthleteStore {
         }
     }
 
-    public func saveProviderConfiguration(_ configuration: ProviderConfiguration) throws {
-        try database.write { db in
-            if configuration.isSelected {
-                try Self.clearSelectedProvider(in: db)
-            }
-            try Self.writeProvider(configuration, in: db)
-        }
-    }
-
-    public func providerConfigurations() throws -> [ProviderConfiguration] {
-        try database.read { db in
-            try Data.fetchAll(db, sql: "SELECT payload FROM provider_configurations ORDER BY id")
-                .map { try JSONDecoder().decode(ProviderConfiguration.self, from: $0) }
-        }
-    }
-
-    public func selectedProviderConfiguration() throws -> ProviderConfiguration? {
-        try providerConfigurations().first(where: \.isSelected)
-    }
-
-    public func selectProvider(id: UUID) throws {
-        try database.write { db in
-            let configurations = try Self.readProviders(in: db)
-            guard configurations.contains(where: { $0.id == id }) else {
-                throw AthleteStoreError.providerNotFound(id)
-            }
-            for var configuration in configurations {
-                configuration.isSelected = configuration.id == id
-                try Self.writeProvider(configuration, in: db)
-            }
-        }
-    }
-
-    public func deleteProviderConfiguration(id: UUID) throws {
-        try database.write { db in
-            try db.execute(sql: "DELETE FROM provider_configurations WHERE id = ?", arguments: [id.uuidString])
-        }
-    }
-
     private static func decodeThread(_ row: Row) throws -> ChatThread {
         guard let id = UUID(uuidString: row["id"]) else {
             throw AthleteStoreError.invalidIdentifier(row["id"])
@@ -222,25 +161,4 @@ extension AthleteStore {
         )
     }
 
-    private static func readProviders(in db: Database) throws -> [ProviderConfiguration] {
-        try Data.fetchAll(db, sql: "SELECT payload FROM provider_configurations")
-            .map { try JSONDecoder().decode(ProviderConfiguration.self, from: $0) }
-    }
-
-    private static func clearSelectedProvider(in db: Database) throws {
-        for var configuration in try readProviders(in: db) where configuration.isSelected {
-            configuration.isSelected = false
-            try writeProvider(configuration, in: db)
-        }
-    }
-
-    private static func writeProvider(_ configuration: ProviderConfiguration, in db: Database) throws {
-        try db.execute(
-            sql: """
-                INSERT INTO provider_configurations (id, payload) VALUES (?, ?)
-                ON CONFLICT(id) DO UPDATE SET payload = excluded.payload
-                """,
-            arguments: [configuration.id.uuidString, try JSONEncoder().encode(configuration)]
-        )
-    }
 }

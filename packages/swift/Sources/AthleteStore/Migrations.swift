@@ -91,6 +91,40 @@ extension AthleteStore {
                 table.column("payload", .blob).notNull()
             }
         }
+        migrator.registerMigration("v4_on_device_models") { db in
+            try db.create(table: "personalization_state", ifNotExists: true) { table in
+                table.column("id", .text).primaryKey()
+                table.column("payload", .blob).notNull()
+                table.column("updated_at", .datetime).notNull()
+            }
+            try db.create(table: "recommendation_exposures", ifNotExists: true) { table in
+                table.column("id", .text).primaryKey()
+                table.column("payload", .blob).notNull()
+                table.column("rewarded", .boolean).notNull().defaults(to: false)
+            }
+            try db.create(table: "feedback_events", ifNotExists: true) { table in
+                table.column("id", .text).primaryKey()
+                table.column("kind", .text).notNull()
+                table.column("payload", .blob).notNull()
+                table.column("created_at", .datetime).notNull()
+            }
+            try db.create(table: "food_observations", ifNotExists: true) { table in
+                table.column("id", .text).primaryKey()
+                table.column("payload", .blob).notNull()
+                table.column("captured_at", .datetime).notNull()
+            }
+            try db.create(table: "coach_threads", ifNotExists: true) { table in
+                table.column("id", .text).primaryKey()
+                table.column("payload", .blob).notNull()
+                table.column("updated_at", .datetime).notNull()
+            }
+            try db.create(table: "coach_messages", ifNotExists: true) { table in
+                table.column("id", .text).primaryKey()
+                table.column("thread_id", .text).notNull().indexed()
+                table.column("payload", .blob).notNull()
+                table.column("created_at", .datetime).notNull()
+            }
+        }
         return migrator
     }
 
