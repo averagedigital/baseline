@@ -65,9 +65,35 @@ public struct FoodDetectionFrame: Sendable {
 
 public struct FoodDetectionTracker: Sendable {
     public let minimumConfidence: Double
-    public init(minimumConfidence: Double = 0.45) { self.minimumConfidence = minimumConfidence }
+    public let minimumHits: Int
+    public let maximumMisses: Int
+    private var tracks: [UUID: TrackedFoodObject] = [:]
+    public init(minimumConfidence: Double = 0.45, minimumHits: Int = 2, maximumMisses: Int = 3) { self.minimumConfidence = minimumConfidence; self.minimumHits = minimumHits; self.maximumMisses = maximumMisses }
 
-    public func stable(_ detections: [FoodDetection]) -> [FoodDetection] {
-        detections.filter { $0.confidence >= minimumConfidence }.prefix(5).map { $0 }
+    public mutating func update(_ detections: [FoodDetection], at timestamp: TimeInterval) -> [TrackedFoodObject] {
+        var matched = Set<UUID>()
+        for detection in detections where detection.confidence >= minimumConfidence {
+            let candidate = tracks.values.filter { $0.label == detection.label && $0.boundingBox.iou(with: detection.boundingBox) >= 0.1 }.min { $0.boundingBox.centerDistance(to: detection.boundingBox) < $1.boundingBox.centerDistance(to: detection.boundingBox) }
+            if let candidate {
+                var track = candidate; matched.insert(track.id); track.boundingBox = track.boundingBox.ema(with: detection.boundingBox, alpha: 0.35); track.confidence = 0.65 * track.confidence + 0.35 * detection.confidence; track.hitCount += 1; track.missCount = 0; track.lastSeenAt = timestamp; tracks[track.id] = track
+            } else {
+                let track = TrackedFoodObject(id: detection.id, label: detection.label, confidence: detection.confidence, boundingBox: detection.boundingBox, hitCount: 1, missCount: 0, firstSeenAt: timestamp, lastSeenAt: timestamp); tracks[track.id] = track
+            }
+        }
+        for id in tracks.keys where !matched.contains(id) { tracks[id]?.missCount += 1 }
+        tracks = tracks.filter { $0.value.missCount <= maximumMisses }
+        return tracks.values.filter { $0.hitCount >= minimumHits }.sorted { $0.confidence > $1.confidence }.prefix(5).map { $0 }
     }
+}
+
+public struct TrackedFoodObject: Codable, Equatable, Sendable, Identifiable {
+    public let id: UUID; public var label: String; public var confidence: Double; public var boundingBox: NormalizedFoodRect
+    public var hitCount: Int; public var missCount: Int; public let firstSeenAt: TimeInterval; public var lastSeenAt: TimeInterval
+}
+
+private extension NormalizedFoodRect {
+    var center: (Double, Double) { (x + width / 2, y + height / 2) }
+    func centerDistance(to other: NormalizedFoodRect) -> Double { hypot(center.0 - other.center.0, center.1 - other.center.1) }
+    func iou(with other: NormalizedFoodRect) -> Double { let w = max(0, min(x + width, other.x + other.width) - max(x, other.x)); let h = max(0, min(y + height, other.y + other.height) - max(y, other.y)); let intersection = w * h; return intersection / max(width * height + other.width * other.height - intersection, 0.0001) }
+    func ema(with other: NormalizedFoodRect, alpha: Double) -> NormalizedFoodRect { NormalizedFoodRect(x: x + alpha * (other.x - x), y: y + alpha * (other.y - y), width: width + alpha * (other.width - width), height: height + alpha * (other.height - height)) }
 }

@@ -48,6 +48,7 @@ public struct ActivityWindow: Equatable, Sendable {
     public let normalizedJointVelocity: Double
     public let movingJointFraction: Double
     public let boundingBoxMotion: Double
+    public let motionScore: Double
     public let trackingAvailable: Bool
 
     public init(
@@ -55,12 +56,14 @@ public struct ActivityWindow: Equatable, Sendable {
         normalizedJointVelocity: Double,
         movingJointFraction: Double,
         boundingBoxMotion: Double,
+        motionScore: Double? = nil,
         trackingAvailable: Bool
     ) {
         self.duration = duration
         self.normalizedJointVelocity = normalizedJointVelocity
         self.movingJointFraction = movingJointFraction
         self.boundingBoxMotion = boundingBoxMotion
+        self.motionScore = min(max(motionScore ?? max(normalizedJointVelocity, movingJointFraction), 0), 1)
         self.trackingAvailable = trackingAvailable
     }
 }
@@ -182,17 +185,14 @@ public struct ActivitySegmenter: Sendable {
     }
 
     private func entersActive(_ window: ActivityWindow) -> Bool {
-        let articulation = window.normalizedJointVelocity >= configuration.enterVelocity
-            || window.movingJointFraction >= configuration.enterMovingFraction
+        let articulation = window.motionScore >= configuration.enterVelocity
         let boxTrigger = configuration.boundingBoxCanEnterActivity
             && window.boundingBoxMotion >= configuration.enterBoundingBoxMotion
         return articulation || boxTrigger
     }
 
     private func exitsActive(_ window: ActivityWindow) -> Bool {
-        window.normalizedJointVelocity <= configuration.exitVelocity
-            && window.movingJointFraction <= configuration.exitMovingFraction
-            && window.boundingBoxMotion <= configuration.exitBoundingBoxMotion
+        window.motionScore <= configuration.exitVelocity
     }
 
     private func normalize(_ source: [ActivitySegment]) -> [ActivitySegment] {

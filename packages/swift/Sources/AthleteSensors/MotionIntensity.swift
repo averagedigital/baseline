@@ -51,6 +51,7 @@ public struct MotionMetrics: Equatable, Sendable {
     public let normalizedJointVelocity: Double
     public let movingJointFraction: Double
     public let boundingBoxMotion: Double
+    public let segmentationMotionScore: Double
     public let acceptedJointCount: Int
     public let isValid: Bool
     public let exclusionReason: PoseMetricExclusionReason
@@ -60,6 +61,7 @@ public struct MotionMetrics: Equatable, Sendable {
         normalizedJointVelocity: Double,
         movingJointFraction: Double,
         boundingBoxMotion: Double,
+        segmentationMotionScore: Double = 0,
         acceptedJointCount: Int,
         isValid: Bool,
         exclusionReason: PoseMetricExclusionReason
@@ -68,6 +70,7 @@ public struct MotionMetrics: Equatable, Sendable {
         self.normalizedJointVelocity = normalizedJointVelocity
         self.movingJointFraction = movingJointFraction
         self.boundingBoxMotion = boundingBoxMotion
+        self.segmentationMotionScore = min(max(segmentationMotionScore, 0), 1)
         self.acceptedJointCount = acceptedJointCount
         self.isValid = isValid
         self.exclusionReason = exclusionReason
@@ -190,6 +193,8 @@ public struct MotionIntensityEstimator: Sendable {
             filter.update(value: clipped, timestamp: frame.capturedAt),
             configuration.maximumIntensity
         )
+        let robustVelocity = robustClip(normalizedVelocity)
+        let segmentationScore = min(max(0.65 * robustVelocity + 0.35 * movingFraction, 0), 1)
 
         robustWindow.append(rawIntensity)
         if robustWindow.count > configuration.robustWindowSize {
@@ -204,6 +209,7 @@ public struct MotionIntensityEstimator: Sendable {
                 normalizedJointVelocity: normalizedVelocity,
                 movingJointFraction: movingFraction,
                 boundingBoxMotion: normalizedBoxMotion,
+                segmentationMotionScore: 0,
                 acceptedJointCount: jointSpeeds.count,
                 isValid: false,
                 exclusionReason: .warmup
@@ -215,6 +221,7 @@ public struct MotionIntensityEstimator: Sendable {
             normalizedJointVelocity: normalizedVelocity,
             movingJointFraction: movingFraction,
             boundingBoxMotion: normalizedBoxMotion,
+            segmentationMotionScore: segmentationScore,
             acceptedJointCount: jointSpeeds.count,
             isValid: true,
             exclusionReason: .none
