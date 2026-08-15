@@ -1,23 +1,69 @@
 import SwiftUI
 
 enum BaselineTheme {
-    static let shell = Color(red: 13 / 255, green: 16 / 255, blue: 19 / 255)
-    static let panel = Color(red: 23 / 255, green: 28 / 255, blue: 33 / 255)
-    static let raised = Color(red: 29 / 255, green: 35 / 255, blue: 41 / 255)
-    static let ink = Color(red: 249 / 255, green: 245 / 255, blue: 242 / 255)
-    static let secondary = Color(red: 197 / 255, green: 195 / 255, blue: 200 / 255)
-    static let muted = Color(red: 131 / 255, green: 136 / 255, blue: 145 / 255)
-    static let accent = Color(red: 249 / 255, green: 204 / 255, blue: 115 / 255)
-    static let violet = Color(red: 133 / 255, green: 132 / 255, blue: 189 / 255)
-    static let line = Color.white.opacity(0.10)
+    static let canvas = Color(red: 246 / 255, green: 247 / 255, blue: 249 / 255)
+    static let surface = Color.white
+    static let ink = Color(red: 17 / 255, green: 19 / 255, blue: 24 / 255)
+    static let secondary = Color(red: 102 / 255, green: 112 / 255, blue: 133 / 255)
+    static let muted = Color(red: 152 / 255, green: 162 / 255, blue: 179 / 255)
+    static let border = Color(red: 228 / 255, green: 231 / 255, blue: 236 / 255)
+    static let accent = Color(red: 36 / 255, green: 87 / 255, blue: 1)
+    static let accentSoft = Color(red: 236 / 255, green: 241 / 255, blue: 1)
+    static let success = Color(red: 21 / 255, green: 122 / 255, blue: 85 / 255)
+    static let successSoft = Color(red: 234 / 255, green: 247 / 255, blue: 241 / 255)
+    static let warning = Color(red: 168 / 255, green: 103 / 255, blue: 28 / 255)
+    static let warningSoft = Color(red: 255 / 255, green: 246 / 255, blue: 232 / 255)
+    static let danger = Color(red: 199 / 255, green: 61 / 255, blue: 77 / 255)
+    static let dangerSoft = Color(red: 255 / 255, green: 238 / 255, blue: 241 / 255)
+
+    static let compactAnimation = Animation.easeOut(duration: 0.20)
+    static let standardAnimation = Animation.easeOut(duration: 0.24)
 }
 
 extension View {
-    func baselinePanel(radius: CGFloat = 20) -> some View {
-        background(BaselineTheme.panel, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+    func baselineCard(radius: CGFloat = 20) -> some View {
+        background(BaselineTheme.surface, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .stroke(BaselineTheme.line, lineWidth: 1)
+                    .stroke(BaselineTheme.border, lineWidth: 1)
             }
+    }
+
+    func baselinePage() -> some View {
+        background(BaselineTheme.canvas.ignoresSafeArea())
+            .foregroundStyle(BaselineTheme.ink)
+    }
+}
+
+struct BaselinePrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 13)
+            .background(
+                BaselineTheme.accent.opacity(configuration.isPressed ? 0.82 : 1),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(BaselineTheme.compactAnimation, value: configuration.isPressed)
+    }
+}
+
+struct BaselineSecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(BaselineTheme.ink)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(BaselineTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(BaselineTheme.border, lineWidth: 1)
+            }
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .animation(BaselineTheme.compactAnimation, value: configuration.isPressed)
     }
 }

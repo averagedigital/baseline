@@ -4,41 +4,121 @@ import AthleteStore
 import Observation
 import SwiftUI
 
+struct MotionIntensityHistory: Equatable, Sendable {
+    struct Point: Equatable, Sendable {
+        let timestamp: TimeInterval
+        let value: Double?
+    }
+
+    private(set) var points: [Point] = []
+    let windowDuration: TimeInterval
+
+    init(windowDuration: TimeInterval = 12) {
+        self.windowDuration = max(1, windowDuration)
+    }
+
+    mutating func append(_ value: Double?, at timestamp: TimeInterval) {
+        points.append(Point(timestamp: timestamp, value: value.map { min(max($0, 0), 1) }))
+        let cutoff = timestamp - windowDuration
+        points.removeAll { $0.timestamp < cutoff }
+    }
+
+    mutating func reset() {
+        points.removeAll(keepingCapacity: true)
+    }
+}
+
+enum FoodScanPhase: Equatable, Sendable {
+    case watching
+    case analyzing
+    case noFood
+    case unavailable
+
+    var label: String {
+        switch self {
+        case .watching: "Камера следит за тарелкой"
+        case .analyzing: "Определяю продукты"
+        case .noFood: "Еда не подтверждена"
+        case .unavailable: "Анализ питания недоступен"
+        }
+    }
+}
+
+struct SessionSummaryViewData: Equatable, Sendable {
+    let evidenceID: UUID
+    let endedAt: Date
+    let activeMinutes: Double
+    let restMinutes: Double
+    let setCount: Int
+    let trackingCoverage: Double
+}
+
+struct PendingSessionFeedback: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let evidenceID: UUID
+    let context: PersonalizationContext
+    let summary: SessionSummaryViewData
+}
+
 @MainActor
 @Observable
 final class CameraModel {
     var samples: [PoseSample] = []
+    var boundingBox: NormalizedPoseRect?
     var trackingState: PoseTrackingState = .lost
-    var errorMessage: String?
-    var isRunning = false
+    var metricExclusionReason: PoseMetricExclusionReason = .noSubject
+    var currentMetrics: MotionMetrics = .invalid(.noSubject)
+    var intensityHistory = MotionIntensityHistory()
+    var isCameraRunning = false
+    var isWorkoutRecording = false
     var cameraPosition: CaptureCameraPosition = .front
-    var intensity = MotionIntensityHistory(limit: 90)
+    var foodScanEnabled = true
+    var foodPhase: FoodScanPhase = .watching
+    var latestFood: BackendFoodAnalysis?
+    var backendHome: BackendHome?
+    var lastSession: SessionSummaryViewData?
+    var pendingFeedback: PendingSessionFeedback?
+    var errorMessage: String?
+    var liveSetCount = 0
+    var recordingElapsed: TimeInterval = 0
 
     let pipeline: CameraPipeline
-    private let store: AthleteStore?
-    private var previousSamples: [PoseJoint: NormalizedPosePoint] = [:]
-    private var sessionStartedAt: Date?
-    private var lastFrameAt: Date?
-    private var activityWindows: [ActivityWindow] = []
+    let backend: BackendAPIClient
 
-    init(pipeline: CameraPipeline = CameraPipeline(), store: AthleteStore? = nil) {
+    private let store: AthleteStore?
+    private var intensityEstimator = MotionIntensityEstimator()
+    private var sessionStartedAt: Date?
+    private var activityWindows: [ActivityWindow] = []
+    private var lastFrameTimestamp: TimeInterval?
+    private var lastLiveSummaryAt: TimeInterval = -.infinity
+    private var foodRequestInFlight = false
+
+    init(
+        pipeline: CameraPipeline = CameraPipeline(),
+        store: AthleteStore? = nil,
+        backend: BackendAPIClient = BackendAPIClient()
+    ) {
         self.pipeline = pipeline
+        self.backend = backend
         if let store {
             self.store = store
         } else {
             do {
-                self.store = try Self.openStore()
+                self.store = try StoreFactory.open()
             } catch {
                 self.store = nil
-                errorMessage = "Не удалось открыть локальное хранилище"
+                errorMessage = "Не удалось открыть локальное хранилище."
             }
         }
+
         pipeline.onFrame = { [weak self] frame in
             Task { @MainActor in
-                let intensity = self?.recordIntensity(frame.samples) ?? 0
-                self?.recordActivity(frame, intensity: intensity)
-                self?.samples = frame.samples
-                self?.trackingState = frame.trackingState
+                self?.consume(frame)
+            }
+        }
+        pipeline.onFoodCandidate = { [weak self] jpeg, capturedAt in
+            Task { @MainActor in
+                await self?.analyzeFood(jpeg: jpeg, capturedAt: capturedAt)
             }
         }
         pipeline.onError = { [weak self] message in
@@ -48,35 +128,36 @@ final class CameraModel {
         }
     }
 
-    private func recordIntensity(_ samples: [PoseSample]) -> Double {
-        let current = Dictionary(uniqueKeysWithValues: samples.map { ($0.joint, $0.point) })
-        let distances = current.compactMap { joint, point -> Double? in
-            guard let previous = previousSamples[joint] else { return nil }
-            return hypot(point.x - previous.x, point.y - previous.y)
+    var trackingLabel: String {
+        switch trackingState {
+        case .acquiring: "Фиксирую спортсмена"
+        case .stable: "Слежение стабильно"
+        case .degraded: "Часть суставов не видна"
+        case .lost where metricExclusionReason == .identityDiscontinuity: "Спортсмен потерян — метрики на паузе"
+        case .lost: "Тело не найдено"
+        case .multiplePeople: "Пересечение людей — метрики на паузе"
         }
-        let average = distances.isEmpty ? 0 : distances.reduce(0, +) / Double(distances.count)
-        let value = min(average * 8, 1)
-        intensity.append(value)
-        previousSamples = current
-        return value
     }
 
-    private func recordActivity(_ frame: PoseFrame, intensity: Double) {
-        let now = Date()
-        defer { lastFrameAt = now }
-        guard let lastFrameAt else { return }
-        let duration = now.timeIntervalSince(lastFrameAt)
-        guard duration > 0 else { return }
-        activityWindows.append(ActivityWindow(
-            duration: duration,
-            normalizedJointVelocity: intensity,
-            movingJointFraction: intensity,
-            boundingBoxMotion: 0,
-            trackingAvailable: frame.trackingState == .stable || frame.trackingState == .degraded
-        ))
+    var trackingTone: Color {
+        switch trackingState {
+        case .stable: BaselineTheme.success
+        case .acquiring, .degraded, .multiplePeople: BaselineTheme.warning
+        case .lost: BaselineTheme.danger
+        }
     }
 
-    func start() async {
+    var latestFoodTitle: String {
+        guard let latestFood, !latestFood.items.isEmpty else { return foodPhase.label }
+        return latestFood.items.prefix(3).map(\.name).joined(separator: ", ")
+    }
+
+    var latestFoodCalories: String? {
+        guard let latestFood, latestFood.containsFood else { return nil }
+        return "≈ \(Int(latestFood.caloriesLow.rounded()))–\(Int(latestFood.caloriesHigh.rounded())) ккал"
+    }
+
+    func startCamera() async {
         let granted: Bool
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
@@ -94,40 +175,18 @@ final class CameraModel {
         }
         do {
             try await pipeline.start()
-            isRunning = true
-            sessionStartedAt = Date()
-            lastFrameAt = nil
-            activityWindows = []
+            isCameraRunning = true
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    func stop() {
+    func stopCamera() {
         pipeline.stop()
-        closeSessionIfNeeded()
-        isRunning = false
-        samples = []
-        trackingState = .lost
-    }
-
-    private func closeSessionIfNeeded() {
-        guard let sessionStartedAt, let store, !activityWindows.isEmpty else { return }
-        self.sessionStartedAt = nil
-        let interval = DateInterval(start: sessionStartedAt, end: Date())
-        let windows = activityWindows
-        activityWindows = []
-        Task {
-            do {
-                let summary = try ActivitySegmenter(configuration: .camera).segment(windows)
-                let session = SessionEvidenceBuilder().make(interval: interval, summary: summary)
-                let envelope = try session.envelope(ingestedAt: interval.end)
-                try await store.appendEvidence(envelope, payload: session)
-            } catch {
-                errorMessage = "Не удалось сохранить тренировку"
-            }
-        }
+        isCameraRunning = false
+        intensityEstimator.reset()
+        intensityHistory.reset()
     }
 
     func switchCamera() async {
@@ -135,177 +194,553 @@ final class CameraModel {
         do {
             try await pipeline.switchCamera(to: target)
             cameraPosition = target
-            previousSamples = [:]
+            resetRealtimeMetrics()
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    private static func openStore() throws -> AthleteStore {
-        let manager = FileManager.default
-        let root = try manager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        ).appending(path: "Baseline", directoryHint: .isDirectory)
-        try manager.createDirectory(at: root, withIntermediateDirectories: true)
-        return try AthleteStore(path: root.appending(path: "baseline.sqlite").path)
-    }
-}
-
-struct CameraScreen: View {
-    @State private var model: CameraModel
-
-    init(store: AthleteStore? = nil) {
-        _model = State(initialValue: CameraModel(store: store))
+    func resetSubjectLock() {
+        pipeline.resetSubjectLock()
+        resetRealtimeMetrics()
     }
 
-    var body: some View {
-        ZStack {
-            CameraPreview(
-                session: model.pipeline.session,
-                isMirrored: model.cameraPosition == .front
-            )
-                .ignoresSafeArea()
-            PoseOverlay(samples: model.samples, state: model.trackingState)
-                .ignoresSafeArea()
-
-            VStack {
-                header
-                Spacer()
-                status
-                intensityChart
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 12)
-        }
-        .background(Color.black)
-        .task { await model.start() }
-        .onDisappear { model.stop() }
-        .sensoryFeedback(.selection, trigger: model.cameraPosition)
-    }
-
-    private var header: some View {
-        HStack {
-            HStack(spacing: 8) {
-                LiveIndicator()
-                Text(model.cameraPosition == .front ? "ФРОНТАЛЬНАЯ" : "ОСНОВНАЯ")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .tracking(1.2)
-            }
-            Spacer()
-            Button {
-                Task { await model.switchCamera() }
-            } label: {
-                Image(systemName: "camera.rotate.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 42, height: 42)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-            .foregroundStyle(.white)
-            .accessibilityLabel("Переключить камеру")
-        }
-        .foregroundStyle(.white)
-    }
-
-    @ViewBuilder
-    private var status: some View {
-        if let errorMessage = model.errorMessage {
-            Text(errorMessage)
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .multilineTextAlignment(.center)
-                .padding(14)
-                .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 14))
-                .foregroundStyle(.white)
+    func setFoodScanEnabled(_ enabled: Bool) {
+        foodScanEnabled = enabled
+        pipeline.setFoodScanEnabled(enabled)
+        if enabled {
+            foodPhase = .watching
         } else {
-            Text(statusLabel)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .tracking(1)
-                .foregroundStyle(skeletonColor)
-                .shadow(color: .black.opacity(0.9), radius: 3, y: 1)
-                .padding(.bottom, 2)
+            latestFood = nil
         }
     }
 
-    private var intensityChart: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(.blue)
-                    .frame(width: 5, height: 5)
-                    .shadow(color: .blue.opacity(0.85), radius: 4)
-                Text("ИНТЕНСИВНОСТЬ")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .tracking(1)
-                    .foregroundStyle(.white.opacity(0.78))
+    func startWorkout() {
+        guard !isWorkoutRecording else { return }
+        isWorkoutRecording = true
+        sessionStartedAt = Date()
+        activityWindows = []
+        lastFrameTimestamp = nil
+        lastLiveSummaryAt = -.infinity
+        liveSetCount = 0
+        recordingElapsed = 0
+        intensityEstimator.reset()
+        intensityHistory.reset()
+        errorMessage = nil
+    }
+
+    func stopWorkout() async {
+        guard isWorkoutRecording else { return }
+        isWorkoutRecording = false
+        guard let startedAt = sessionStartedAt else { return }
+        sessionStartedAt = nil
+        let windows = activityWindows
+        activityWindows = []
+        lastFrameTimestamp = nil
+        recordingElapsed = 0
+
+        guard !windows.isEmpty else {
+            liveSetCount = 0
+            return
+        }
+
+        do {
+            let summary = try ActivitySegmenter(configuration: .cameraV2).segment(windows)
+            let endedAt = Date()
+            let interval = DateInterval(start: startedAt, end: endedAt)
+            let session = SessionEvidenceBuilder(algorithmVersion: "activity-segmentation-v2")
+                .make(interval: interval, summary: summary)
+            let envelope = try session.envelope(ingestedAt: endedAt)
+
+            if let store {
+                try await store.appendEvidence(envelope, payload: session)
             }
-            MotionIntensityChart(values: model.intensity.values)
-                .frame(height: 74)
+
+            var backendError: Error?
+            do {
+                try await backend.uploadEvidence(envelope: envelope, payload: session)
+            } catch {
+                backendError = error
+            }
+
+            let viewData = SessionSummaryViewData(
+                evidenceID: envelope.id,
+                endedAt: endedAt,
+                activeMinutes: summary.activeTime / 60,
+                restMinutes: summary.restTime / 60,
+                setCount: summary.setCount,
+                trackingCoverage: summary.coverage
+            )
+            lastSession = viewData
+            liveSetCount = summary.setCount
+            let context = PersonalizationContext(
+                activeMinutes: summary.activeTime / 60,
+                setCount: summary.setCount,
+                workRestRatio: summary.activeTime / max(summary.restTime, 60),
+                trackingCoverage: summary.coverage,
+                sevenDayActiveMinutes: summary.activeTime / 60,
+                hoursSincePreviousSession: 72,
+                recentFoodKcalMidpoint: latestFood.map { ($0.caloriesLow + $0.caloriesHigh) / 2 } ?? 0
+            )
+            pendingFeedback = PendingSessionFeedback(
+                evidenceID: envelope.id,
+                context: context,
+                summary: viewData
+            )
+            await refreshHome()
+            if let backendError {
+                errorMessage = "Тренировка сохранена локально, но backend пока недоступен: \(backendError.localizedDescription)"
+            }
+        } catch {
+            errorMessage = "Не удалось сохранить тренировку: \(error.localizedDescription)"
         }
-        .shadow(color: .black.opacity(0.55), radius: 4, y: 1)
-        .padding(.top, 12)
     }
 
-    private var statusLabel: String {
-        switch model.trackingState {
-        case .stable: "TRACKING СТАБИЛЕН"
-        case .degraded: "TRACKING НЕПОЛНЫЙ"
-        case .lost: "ТЕЛО НЕ НАЙДЕНО"
-        case .multiplePeople: "В КАДРЕ НЕСКОЛЬКО ЛЮДЕЙ"
+    func submitRPE(_ value: Double, note: String, for feedback: PendingSessionFeedback) async -> Bool {
+        do {
+            _ = try await backend.sendSessionRPE(
+                value: value,
+                sourceEvidenceID: feedback.evidenceID,
+                note: note,
+                context: feedback.context
+            )
+            pendingFeedback = nil
+            await refreshHome()
+            return true
+        } catch {
+            errorMessage = "Не удалось сохранить RPE: \(error.localizedDescription)"
+            return false
         }
     }
 
-    private var skeletonColor: Color {
-        switch model.trackingState {
-        case .stable, .degraded, .multiplePeople: .green
-        case .lost: .clear
+    func refreshHome() async {
+        do {
+            let value = try await backend.home()
+            backendHome = value
+            if let session = value.latestSession,
+               lastSession == nil || session.observedTo > (lastSession?.endedAt ?? .distantPast) {
+                lastSession = SessionSummaryViewData(
+                    evidenceID: session.id,
+                    endedAt: session.observedTo,
+                    activeMinutes: (session.activeTime ?? 0) / 60,
+                    restMinutes: (session.restTime ?? 0) / 60,
+                    setCount: session.setCount ?? 0,
+                    trackingCoverage: session.trackingCoverage ?? 0
+                )
+            }
+            if let food = value.latestFood {
+                latestFood = BackendFoodAnalysis(
+                    containsFood: true,
+                    stored: true,
+                    duplicateOf: nil,
+                    observationID: food.id,
+                    confidence: food.items.map(\.labelConfidence).min() ?? 0,
+                    caloriesLow: food.caloriesLow,
+                    caloriesHigh: food.caloriesHigh,
+                    items: food.items
+                )
+            }
+        } catch {
+            // The camera and local evidence must keep working without a network connection.
         }
+    }
+
+    func dismissLatestFood() async {
+        guard let observationID = latestFood?.observationID else {
+            latestFood = nil
+            return
+        }
+        do {
+            try await backend.dismissFood(observationID: observationID)
+            latestFood = nil
+            foodPhase = .watching
+            await refreshHome()
+        } catch {
+            errorMessage = "Не удалось исправить запись о еде: \(error.localizedDescription)"
+        }
+    }
+
+    private func consume(_ frame: PoseFrame) {
+        samples = frame.samples
+        boundingBox = frame.boundingBox
+        trackingState = frame.trackingState
+        metricExclusionReason = frame.exclusionReason
+
+        let metrics = intensityEstimator.update(frame: frame)
+        currentMetrics = metrics
+        intensityHistory.append(metrics.isValid ? metrics.intensity : nil, at: frame.capturedAt)
+        recordActivity(frame: frame, metrics: metrics)
+    }
+
+    private func recordActivity(frame: PoseFrame, metrics: MotionMetrics) {
+        guard isWorkoutRecording else { return }
+        if let sessionStartedAt {
+            recordingElapsed = Date().timeIntervalSince(sessionStartedAt)
+        }
+        defer { lastFrameTimestamp = frame.capturedAt }
+        guard let previousTimestamp = lastFrameTimestamp else { return }
+        let duration = frame.capturedAt - previousTimestamp
+        guard duration > 0, duration <= 2 else { return }
+
+        activityWindows.append(ActivityWindow(
+            duration: duration,
+            normalizedJointVelocity: metrics.isValid ? metrics.normalizedJointVelocity : 0,
+            movingJointFraction: metrics.isValid ? metrics.movingJointFraction : 0,
+            boundingBoxMotion: metrics.isValid ? metrics.boundingBoxMotion : 0,
+            trackingAvailable: metrics.isValid
+        ))
+
+        if frame.capturedAt - lastLiveSummaryAt >= 0.75 {
+            lastLiveSummaryAt = frame.capturedAt
+            if let summary = try? ActivitySegmenter(configuration: .cameraV2).segment(activityWindows) {
+                liveSetCount = summary.setCount
+            }
+        }
+    }
+
+    private func analyzeFood(jpeg: Data, capturedAt: Date) async {
+        guard foodScanEnabled, !foodRequestInFlight else { return }
+        foodRequestInFlight = true
+        foodPhase = .analyzing
+        defer { foodRequestInFlight = false }
+        do {
+            let result = try await backend.analyzeFood(jpeg: jpeg, capturedAt: capturedAt)
+            if result.containsFood {
+                latestFood = result
+                foodPhase = .watching
+                await refreshHome()
+            } else {
+                foodPhase = .noFood
+                try? await Task.sleep(for: .seconds(2))
+                if foodScanEnabled { foodPhase = .watching }
+            }
+        } catch {
+            foodPhase = .unavailable
+        }
+    }
+
+    private func resetRealtimeMetrics() {
+        samples = []
+        boundingBox = nil
+        trackingState = .acquiring
+        metricExclusionReason = .acquiringSubject
+        currentMetrics = .invalid(.warmup)
+        intensityEstimator.reset()
+        intensityHistory.reset()
+        lastFrameTimestamp = nil
     }
 }
 
 private extension ActivitySegmentationConfiguration {
-    static let camera = ActivitySegmentationConfiguration(
-        enterVelocity: 0.04,
-        exitVelocity: 0.015,
-        enterMovingFraction: 0.04,
-        exitMovingFraction: 0.015,
-        enterBoundingBoxMotion: 0.04,
-        exitBoundingBoxMotion: 0.015,
-        minimumActiveDuration: 0.5,
-        minimumRestDuration: 0.5,
-        shortTrackingGapDuration: 1
+    static let cameraV2 = ActivitySegmentationConfiguration(
+        enterVelocity: 0.36,
+        exitVelocity: 0.16,
+        enterMovingFraction: 0.42,
+        exitMovingFraction: 0.20,
+        enterBoundingBoxMotion: 0.42,
+        exitBoundingBoxMotion: 0.18,
+        minimumActiveDuration: 1.5,
+        minimumRestDuration: 1.0,
+        shortTrackingGapDuration: 1.0,
+        enterConfirmationDuration: 0.8,
+        exitConfirmationDuration: 0.7,
+        boundingBoxCanEnterActivity: false
     )
 }
 
+struct CameraCard: View {
+    let model: CameraModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                CameraPreview(
+                    session: model.pipeline.session,
+                    isMirrored: model.cameraPosition == .front
+                )
+                PoseOverlay(
+                    samples: model.samples,
+                    boundingBox: model.boundingBox,
+                    state: model.trackingState
+                )
+
+                VStack {
+                    HStack {
+                        TrackingStatusPill(
+                            label: model.trackingLabel,
+                            tone: model.trackingTone,
+                            pulses: model.trackingState == .stable && model.isCameraRunning
+                        )
+                        Spacer()
+                        cameraControls
+                    }
+                    Spacer()
+                    if model.trackingState == .multiplePeople
+                        || model.metricExclusionReason == .identityDiscontinuity {
+                        Button("Зафиксировать меня заново") {
+                            model.resetSubjectLock()
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(BaselineTheme.ink)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.94), in: Capsule())
+                        .transition(.opacity)
+                    }
+                }
+                .padding(12)
+            }
+            .frame(height: 360)
+            .background(Color.black)
+            .clipShape(UnevenRoundedRectangle(
+                topLeadingRadius: 20,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 20,
+                style: .continuous
+            ))
+
+            liveDock
+                .padding(16)
+        }
+        .baselineCard(radius: 20)
+        .animation(reduceMotion ? nil : BaselineTheme.standardAnimation, value: model.trackingState)
+    }
+
+    private var cameraControls: some View {
+        HStack(spacing: 8) {
+            Button {
+                Task { await model.switchCamera() }
+            } label: {
+                Image(systemName: "camera.rotate")
+                    .frame(width: 38, height: 38)
+                    .background(Color.white.opacity(0.94), in: Circle())
+            }
+            .foregroundStyle(BaselineTheme.ink)
+            .accessibilityLabel("Переключить камеру")
+        }
+    }
+
+    private var liveDock: some View {
+        VStack(spacing: 14) {
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Интенсивность")
+                        .font(.caption)
+                        .foregroundStyle(BaselineTheme.secondary)
+                    Text(model.currentMetrics.isValid
+                        ? String(format: "%.0f%%", model.currentMetrics.intensity * 100)
+                        : "—")
+                        .font(.system(size: 25, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                }
+                MotionIntensityChart(history: model.intensityHistory)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text("Подходы")
+                        .font(.caption)
+                        .foregroundStyle(BaselineTheme.secondary)
+                    Text("\(model.liveSetCount)")
+                        .font(.system(size: 25, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                }
+            }
+
+            Button {
+                Task {
+                    if model.isWorkoutRecording {
+                        await model.stopWorkout()
+                    } else {
+                        model.startWorkout()
+                    }
+                }
+            } label: {
+                HStack {
+                    Image(systemName: model.isWorkoutRecording ? "stop.fill" : "play.fill")
+                    Text(model.isWorkoutRecording
+                        ? "Завершить · \(duration(model.recordingElapsed))"
+                        : "Начать тренировку")
+                }
+            }
+            .buttonStyle(BaselinePrimaryButtonStyle())
+        }
+    }
+
+    private func duration(_ seconds: TimeInterval) -> String {
+        let total = max(Int(seconds), 0)
+        return String(format: "%02d:%02d", total / 60, total % 60)
+    }
+}
+
+struct LatestFoodCard: View {
+    let model: CameraModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Питание", systemImage: "fork.knife")
+                    .font(.system(size: 17, weight: .semibold))
+                Spacer()
+                if model.foodPhase == .analyzing {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text(model.foodScanEnabled ? "Авто" : "Выкл.")
+                        .font(.caption)
+                        .foregroundStyle(BaselineTheme.secondary)
+                }
+            }
+
+            if let calories = model.latestFoodCalories {
+                Text(model.latestFoodTitle)
+                    .font(.system(size: 16, weight: .medium))
+                    .lineLimit(2)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(calories)
+                        .font(.system(size: 24, weight: .semibold, design: .rounded))
+                    Spacer()
+                    Button("Не еда") {
+                        Task { await model.dismissLatestFood() }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(BaselineTheme.danger)
+                }
+                Text("Диапазон, а не точное число: порция оценивается по одному RGB-кадру.")
+                    .font(.caption)
+                    .foregroundStyle(BaselineTheme.secondary)
+            } else {
+                Text(model.latestFoodTitle)
+                    .font(.system(size: 15, weight: .medium))
+                Text("Кадры отправляются только после двух последовательных food-сигналов; исходные изображения не сохраняются.")
+                    .font(.caption)
+                    .foregroundStyle(BaselineTheme.secondary)
+            }
+        }
+        .padding(18)
+        .baselineCard()
+    }
+}
+
+struct HomeInsightCard: View {
+    let model: CameraModel
+    let openCoach: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Сейчас")
+                    .font(.system(size: 17, weight: .semibold))
+                Spacer()
+                if let confidence = model.backendHome?.predictionConfidence, confidence > 0 {
+                    Text("персонализация \(Int((confidence * 100).rounded()))%")
+                        .font(.caption)
+                        .foregroundStyle(BaselineTheme.secondary)
+                }
+            }
+
+            Text(insightTitle)
+                .font(.system(size: 23, weight: .semibold, design: .rounded))
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let session = model.lastSession {
+                Text("Последняя тренировка: \(session.setCount) подходов, \(Int(session.activeMinutes.rounded())) мин активности, покрытие \(Int((session.trackingCoverage * 100).rounded()))%.")
+                    .font(.subheadline)
+                    .foregroundStyle(BaselineTheme.secondary)
+            } else {
+                Text("После первой сохранённой тренировки здесь появится один приоритетный вывод.")
+                    .font(.subheadline)
+                    .foregroundStyle(BaselineTheme.secondary)
+            }
+
+            Button("Открыть Coach") {
+                openCoach()
+            }
+            .buttonStyle(BaselineSecondaryButtonStyle())
+        }
+        .padding(18)
+        .baselineCard()
+    }
+
+    private var insightTitle: String {
+        switch model.backendHome?.suggestedAction {
+        case "technique": "Сфокусироваться на технике"
+        case "load": "Сверить рабочую нагрузку"
+        case "recovery": "Проверить восстановление"
+        case "nutrition": "Уточнить питание вокруг тренировки"
+        case "consistency": "Сохранить ритм тренировок"
+        default: "Собрать первую надёжную базовую линию"
+        }
+    }
+}
+
+private struct TrackingStatusPill: View {
+    let label: String
+    let tone: Color
+    let pulses: Bool
+    @State private var highlighted = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(tone)
+                .frame(width: 7, height: 7)
+                .opacity(pulses && highlighted ? 0.45 : 1)
+            Text(label)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(BaselineTheme.ink)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .background(Color.white.opacity(0.94), in: Capsule())
+        .onAppear {
+            guard pulses, !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                highlighted = true
+            }
+        }
+        .onChange(of: pulses) { _, value in
+            highlighted = false
+            guard value, !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                highlighted = true
+            }
+        }
+    }
+}
+
 private struct MotionIntensityChart: View {
-    let values: [Double]
+    let history: MotionIntensityHistory
 
     var body: some View {
         Canvas { context, size in
-            guard values.count > 1 else { return }
+            guard history.points.count > 1,
+                  let firstTime = history.points.first?.timestamp,
+                  let lastTime = history.points.last?.timestamp else { return }
+            let span = max(lastTime - firstTime, 0.001)
             var path = Path()
-            for (index, value) in values.enumerated() {
-                let x = CGFloat(index) / CGFloat(values.count - 1) * size.width
+            var hasOpenSegment = false
+            for point in history.points {
+                guard let value = point.value else {
+                    hasOpenSegment = false
+                    continue
+                }
+                let x = CGFloat((point.timestamp - firstTime) / span) * size.width
                 let y = size.height * (1 - CGFloat(value))
-                if index == 0 { path.move(to: CGPoint(x: x, y: y)) }
-                else { path.addLine(to: CGPoint(x: x, y: y)) }
+                if hasOpenSegment {
+                    path.addLine(to: CGPoint(x: x, y: y))
+                } else {
+                    path.move(to: CGPoint(x: x, y: y))
+                    hasOpenSegment = true
+                }
             }
-            var area = path
-            area.addLine(to: CGPoint(x: size.width, y: size.height))
-            area.addLine(to: CGPoint(x: 0, y: size.height))
-            area.closeSubpath()
-            context.fill(area, with: .linearGradient(
-                Gradient(colors: [.blue.opacity(0.32), .blue.opacity(0)]),
-                startPoint: .zero,
-                endPoint: CGPoint(x: 0, y: size.height)
-            ))
-            context.stroke(path, with: .color(.blue.opacity(0.28)), lineWidth: 7)
-            context.stroke(path, with: .color(.blue), lineWidth: 2.5)
+            context.stroke(path, with: .color(BaselineTheme.accent), lineWidth: 2)
         }
-        .accessibilityLabel("График интенсивности движений")
+        .accessibilityLabel("Интенсивность за последние двенадцать секунд")
     }
 }
 
@@ -339,6 +774,7 @@ private final class PreviewView: UIView {
 
 private struct PoseOverlay: View {
     let samples: [PoseSample]
+    let boundingBox: NormalizedPoseRect?
     let state: PoseTrackingState
 
     var body: some View {
@@ -346,28 +782,39 @@ private struct PoseOverlay: View {
             let points = Dictionary(uniqueKeysWithValues: samples.map {
                 ($0.joint, CGPoint(x: $0.point.x * size.width, y: $0.point.y * size.height))
             })
-            for bone in bones {
-                guard let start = points[bone.0], let end = points[bone.1] else { continue }
-                var path = Path()
-                path.move(to: start)
-                path.addLine(to: end)
-                context.stroke(path, with: .color(color.opacity(0.24)), lineWidth: 9)
-                context.stroke(path, with: .color(color), lineWidth: 3)
+            for (startJoint, endJoint) in bones {
+                guard let start = points[startJoint], let end = points[endJoint] else { continue }
+                var line = Path()
+                line.move(to: start)
+                line.addLine(to: end)
+                context.stroke(line, with: .color(tone), lineWidth: 3)
             }
             for point in points.values {
-                let glow = CGRect(x: point.x - 6, y: point.y - 6, width: 12, height: 12)
-                let core = CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)
-                context.fill(Path(ellipseIn: glow), with: .color(color.opacity(0.22)))
-                context.fill(Path(ellipseIn: core), with: .color(color))
+                let rect = CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)
+                context.fill(Path(ellipseIn: rect), with: .color(tone))
+            }
+            if let boundingBox {
+                let rect = CGRect(
+                    x: boundingBox.x * size.width,
+                    y: boundingBox.y * size.height,
+                    width: boundingBox.width * size.width,
+                    height: boundingBox.height * size.height
+                )
+                context.stroke(
+                    Path(roundedRect: rect, cornerRadius: 12),
+                    with: .color(tone.opacity(0.75)),
+                    style: StrokeStyle(lineWidth: 1.5, dash: [7, 5])
+                )
             }
         }
+        .allowsHitTesting(false)
     }
 
-    private var color: Color {
+    private var tone: Color {
         switch state {
-        case .stable: .green
-        case .degraded, .multiplePeople: .green
-        case .lost: .clear
+        case .stable: BaselineTheme.accent
+        case .acquiring, .degraded, .multiplePeople: Color.orange
+        case .lost: Color.clear
         }
     }
 
@@ -380,20 +827,5 @@ private struct PoseOverlay: View {
             (.leftHip, .leftKnee), (.leftKnee, .leftAnkle),
             (.rightHip, .rightKnee), (.rightKnee, .rightAnkle),
         ]
-    }
-}
-
-private struct LiveIndicator: View {
-    var body: some View {
-        PhaseAnimator([false, true]) { highlighted in
-            Circle()
-                .fill(.green)
-                .frame(width: 7, height: 7)
-                .scaleEffect(highlighted ? 1 : 0.78)
-                .shadow(color: .green.opacity(highlighted ? 0.9 : 0.35), radius: highlighted ? 5 : 2)
-        } animation: { _ in
-            .easeInOut(duration: 1.15)
-        }
-        .accessibilityHidden(true)
     }
 }

@@ -1,420 +1,293 @@
-import AthleteStore
-import AthleteSensors
-import AthleteAgents
-import AthleteCore
 import Foundation
 import Observation
+import SwiftUI
 
-struct ChatMessage: Identifiable, Equatable, Sendable {
+struct CoachMessage: Identifiable, Equatable, Sendable {
     enum Role: Equatable, Sendable {
         case user
         case assistant
     }
 
-    enum State: Equatable, Sendable {
-        case sent
-        case streaming
-    }
-
     let id: UUID
     let role: Role
-    var text: String
-    var state: State
-    let createdAt: Date
+    let text: String
+    let recommendationCategory: String?
+    let feedbackContextID: UUID?
+    var rating: Int?
 
     init(
         id: UUID = UUID(),
         role: Role,
         text: String,
-        state: State = .sent,
-        createdAt: Date = Date()
+        recommendationCategory: String? = nil,
+        feedbackContextID: UUID? = nil,
+        rating: Int? = nil
     ) {
         self.id = id
         self.role = role
         self.text = text
-        self.state = state
-        self.createdAt = createdAt
-    }
-}
-
-struct ChatConversation: Equatable, Sendable {
-    private(set) var messages: [ChatMessage]
-
-    init(messages: [ChatMessage] = []) {
-        self.messages = messages
-    }
-
-    init(history: [ChatHistoryMessage]) {
-        messages = history.map { message in
-            ChatMessage(
-                id: message.id,
-                role: message.role == .user ? .user : .assistant,
-                text: message.text,
-                createdAt: message.createdAt
-            )
-        }
-    }
-
-    var isResponding: Bool {
-        messages.last?.state == .streaming
-    }
-
-    var responsesInput: [ResponsesInputMessage] {
-        messages.compactMap { message in
-            guard message.state == .sent, !message.text.isEmpty else { return nil }
-            return ResponsesInputMessage(
-                role: message.role == .user ? .user : .assistant,
-                content: message.text
-            )
-        }
-    }
-
-    mutating func startUserTurn(_ input: String) -> Bool {
-        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isResponding else { return false }
-        messages.append(ChatMessage(role: .user, text: text))
-        messages.append(ChatMessage(role: .assistant, text: "", state: .streaming))
-        return true
-    }
-
-    mutating func appendAssistantDelta(_ delta: String) {
-        guard isResponding else { return }
-        messages[messages.index(before: messages.endIndex)].text += delta
-    }
-
-    @discardableResult
-    mutating func finishAssistantReply() -> ChatMessage? {
-        guard isResponding else { return nil }
-        let index = messages.index(before: messages.endIndex)
-        if messages[index].text.isEmpty {
-            messages.remove(at: index)
-            return nil
-        }
-        messages[index].state = .sent
-        return messages[index]
-    }
-
-    mutating func discardAssistantReply() {
-        guard isResponding else { return }
-        messages.removeLast()
+        self.recommendationCategory = recommendationCategory
+        self.feedbackContextID = feedbackContextID
+        self.rating = rating
     }
 }
 
 @MainActor
 @Observable
 final class ChatModel {
+    var messages: [CoachMessage] = []
     var draft = ""
-    var conversation = ChatConversation()
-    var threads: [ChatThread] = []
-    var providers: [ProviderConfiguration] = []
-    var selectedThreadID: UUID?
+    var isSending = false
     var errorMessage: String?
-    var requiresProviderSettings = false
-    var hasNewSession = false
 
-    private let store: AthleteStore?
-    private let keyStore: APIKeyStore
-    private let client: ResponsesAPIClient
-    private var replyTask: Task<Void, Never>?
-    private var hasLoaded = false
+    private let backend: BackendAPIClient
+    private let feedbackContext: PersonalizationContext
+    private var threadID: UUID?
 
-    var selectedProvider: ProviderConfiguration? {
-        providers.first(where: \.isSelected)
+    init(backend: BackendAPIClient, feedbackContext: PersonalizationContext) {
+        self.backend = backend
+        self.feedbackContext = feedbackContext
     }
 
-    init() {
-        do {
-            store = try Self.openStore()
-            errorMessage = nil
-        } catch {
-            store = nil
-            errorMessage = "Не удалось открыть локальную историю: \(error.localizedDescription)"
-        }
-        keyStore = APIKeyStore()
-        client = ResponsesAPIClient()
-    }
-
-    init(store: AthleteStore, keyStore: APIKeyStore = APIKeyStore(), client: ResponsesAPIClient = ResponsesAPIClient()) {
-        self.store = store
-        self.keyStore = keyStore
-        self.client = client
-    }
-
-    func load() async {
-        guard !hasLoaded, let store else { return }
-        hasLoaded = true
-        do {
-            providers = try await store.providerConfigurations()
-            threads = try await store.chatThreads()
-            if let session = try await store.latestEvidence(kind: "activity.session.v1") {
-                hasNewSession = try await !store.hasEvidence(kind: "user.narrative.v1", derivedFrom: session.id)
-            }
-            if let first = threads.first {
-                try await openChat(first)
-            }
-        } catch {
-            errorMessage = "Не удалось загрузить чат: \(error.localizedDescription)"
-        }
-    }
-
-    func openChat(_ thread: ChatThread) async throws {
-        guard let store else { return }
-        let history = try await store.chatMessages(threadID: thread.id)
-        selectedThreadID = thread.id
-        conversation = ChatConversation(history: history)
+    func send(_ value: String? = nil) async {
+        let text = (value ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isSending else { return }
+        messages.append(CoachMessage(role: .user, text: text))
         draft = ""
-    }
-
-    func newChat() {
-        guard !conversation.isResponding else { return }
-        selectedThreadID = nil
-        conversation = ChatConversation()
-        draft = ""
-    }
-
-    func send(_ input: String? = nil) {
-        let prompt = (input ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, !conversation.isResponding else { return }
-        guard let store else {
-            errorMessage = "Локальная история недоступна"
-            return
-        }
-        guard let provider = selectedProvider else {
-            Task { await saveDebrief(prompt, in: store) }
-            requiresProviderSettings = true
-            return
-        }
-        let apiKey: String
+        isSending = true
+        errorMessage = nil
         do {
-            guard let storedKey = try keyStore.load(providerID: provider.id), !storedKey.isEmpty else {
-                requiresProviderSettings = true
-                return
-            }
-            apiKey = storedKey
+            let response = try await backend.chat(threadID: threadID, message: text)
+            threadID = response.threadID
+            messages.append(CoachMessage(
+                role: .assistant,
+                text: response.answerMarkdown,
+                recommendationCategory: response.recommendationCategory,
+                feedbackContextID: response.feedbackContextID
+            ))
         } catch {
-            errorMessage = "Не удалось прочитать API-ключ из Keychain"
-            return
+            errorMessage = error.localizedDescription
         }
-        guard conversation.startUserTurn(prompt) else { return }
-        draft = ""
-        let context = conversation.responsesInput
-        let userMessage = conversation.messages[conversation.messages.index(conversation.messages.endIndex, offsetBy: -2)]
-        replyTask = Task { [weak self] in
-            await self?.recordDebrief(prompt, in: store, provider: provider, apiKey: apiKey)
-            await self?.performRequest(
-                store: store,
-                provider: provider,
-                apiKey: apiKey,
-                prompt: prompt,
-                userMessage: userMessage,
-                context: context
+        isSending = false
+    }
+
+    func rate(messageID: UUID, useful: Bool) async {
+        guard let index = messages.firstIndex(where: { $0.id == messageID }),
+              messages[index].role == .assistant,
+              let category = messages[index].recommendationCategory,
+              category != "none",
+              let feedbackContextID = messages[index].feedbackContextID else { return }
+        let value = useful ? 1 : -1
+        messages[index].rating = value
+        do {
+            _ = try await backend.sendRecommendationReward(
+                feedbackContextID: feedbackContextID,
+                reward: Double(value),
+                context: feedbackContext
             )
-        }
-    }
-
-    private func recordDebrief(_ text: String, in store: AthleteStore, provider: ProviderConfiguration, apiKey: String) async {
-        do {
-            guard let session = try await store.latestEvidence(kind: "activity.session.v1"),
-                  try await !store.hasEvidence(kind: "user.narrative.v1", derivedFrom: session.id) else {
-                return
-            }
-            try await appendDebrief(text, session: session, to: store)
-            _ = try await SessionMemoryBuilder(
-                store: store,
-                provider: ResponsesAgentProvider(provider: provider, apiKey: apiKey, client: client)
-            ).build(for: session.id)
-            hasNewSession = false
         } catch {
-            errorMessage = "Не удалось сохранить разбор тренировки"
-        }
-    }
-
-    private func saveDebrief(_ text: String, in store: AthleteStore) async {
-        do {
-            guard let session = try await store.latestEvidence(kind: "activity.session.v1"),
-                  try await !store.hasEvidence(kind: "user.narrative.v1", derivedFrom: session.id) else { return }
-            try await appendDebrief(text, session: session, to: store)
-            hasNewSession = false
-        } catch {
-            errorMessage = "Не удалось сохранить разбор тренировки"
-        }
-    }
-
-    private func appendDebrief(_ text: String, session: EvidenceEnvelope, to store: AthleteStore) async throws {
-        let narrative = try UserNarrativeBuilder().make(text: text, sessionEvidenceID: session.id)
-        let envelope = try narrative.envelope()
-        try await store.appendEvidence(envelope, payload: narrative)
-    }
-
-    func stop() {
-        replyTask?.cancel()
-        replyTask = nil
-        guard let message = conversation.finishAssistantReply(), let threadID = selectedThreadID, let store else { return }
-        Task {
-            do {
-                try await store.appendChatMessage(message.historyMessage(threadID: threadID))
-                await refreshThreads()
-            } catch {
-                errorMessage = "Не удалось сохранить остановленный ответ"
-            }
-        }
-    }
-
-    func selectProvider(id: UUID) async {
-        guard let store else { return }
-        do {
-            try await store.selectProvider(id: id)
-            providers = try await store.providerConfigurations()
-        } catch {
-            errorMessage = "Не удалось выбрать провайдера"
-        }
-    }
-
-    @discardableResult
-    func saveProvider(_ configuration: ProviderConfiguration, apiKey: String) async -> Bool {
-        guard let store else { return false }
-        let name = configuration.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseURL = configuration.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let model = configuration.model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, !baseURL.isEmpty, !model.isEmpty,
-              let url = URL(string: baseURL), url.scheme != nil, url.host != nil else {
-            errorMessage = "Заполните имя, корректный базовый URL и модель"
-            return false
-        }
-        do {
-            let existingKey = try keyStore.load(providerID: configuration.id)
-            guard !apiKey.isEmpty || existingKey != nil else {
-                errorMessage = "Введите API-ключ"
-                return false
-            }
-            var saved = configuration
-            saved.name = name
-            saved.baseURL = baseURL
-            saved.model = model
-            saved.isSelected = configuration.isSelected || selectedProvider == nil
-            try await store.saveProviderConfiguration(saved)
-            if !apiKey.isEmpty {
-                try keyStore.save(apiKey, providerID: saved.id)
-            }
-            providers = try await store.providerConfigurations()
-            requiresProviderSettings = false
-            return true
-        } catch {
-            errorMessage = "Не удалось сохранить провайдера"
-            return false
-        }
-    }
-
-    func deleteProvider(_ configuration: ProviderConfiguration) async {
-        guard let store else { return }
-        do {
-            try await store.deleteProviderConfiguration(id: configuration.id)
-            try keyStore.delete(providerID: configuration.id)
-            providers = try await store.providerConfigurations()
-        } catch {
-            errorMessage = "Не удалось удалить провайдера"
-        }
-    }
-
-    func deleteChat(_ thread: ChatThread) async {
-        guard let store else { return }
-        do {
-            try await store.deleteChat(id: thread.id)
-            if selectedThreadID == thread.id {
-                newChat()
-            }
-            threads = try await store.chatThreads()
-        } catch {
-            errorMessage = "Не удалось удалить диалог"
-        }
-    }
-
-    private func performRequest(
-        store: AthleteStore,
-        provider: ProviderConfiguration,
-        apiKey: String,
-        prompt: String,
-        userMessage: ChatMessage,
-        context: [ResponsesInputMessage]
-    ) async {
-        do {
-            let threadID: UUID
-            if let selectedThreadID {
-                threadID = selectedThreadID
-            } else {
-                let thread = try await store.createChat(title: Self.title(for: prompt))
-                selectedThreadID = thread.id
-                threadID = thread.id
-            }
-            try await store.appendChatMessage(userMessage.historyMessage(threadID: threadID))
-            await refreshThreads()
-            try await client.stream(provider: provider, apiKey: apiKey, messages: context) { [weak self] delta in
-                await MainActor.run {
-                    self?.conversation.appendAssistantDelta(delta)
-                }
-            }
-            if let assistant = conversation.finishAssistantReply() {
-                try await store.appendChatMessage(assistant.historyMessage(threadID: threadID))
-                await refreshThreads()
-            }
-            replyTask = nil
-        } catch {
-            guard !Task.isCancelled else { return }
-            conversation.discardAssistantReply()
-            replyTask = nil
-            errorMessage = Self.message(for: error)
-        }
-    }
-
-    private func refreshThreads() async {
-        guard let store else { return }
-        do {
-            threads = try await store.chatThreads()
-        } catch {
-            errorMessage = "Не удалось обновить историю"
-        }
-    }
-
-    private static func openStore() throws -> AthleteStore {
-        let manager = FileManager.default
-        let root = try manager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        ).appending(path: "Baseline", directoryHint: .isDirectory)
-        try manager.createDirectory(at: root, withIntermediateDirectories: true)
-        return try AthleteStore(path: root.appending(path: "baseline.sqlite").path)
-    }
-
-    private static func title(for prompt: String) -> String {
-        String(prompt.prefix(52))
-    }
-
-    private static func message(for error: Error) -> String {
-        switch error {
-        case let ResponsesAPIError.httpStatus(code):
-            "Responses API вернул HTTP \(code)"
-        case let ResponsesAPIError.remote(message):
-            message
-        case ResponsesAPIError.invalidBaseURL:
-            "Некорректный базовый URL провайдера"
-        case ResponsesAPIError.incompleteStream:
-            "Responses API оборвал поток ответа"
-        default:
-            "Не удалось получить ответ: \(error.localizedDescription)"
+            messages[index].rating = nil
+            errorMessage = "Не удалось сохранить оценку совета."
         }
     }
 }
 
-private extension ChatMessage {
-    func historyMessage(threadID: UUID) -> ChatHistoryMessage {
-        ChatHistoryMessage(
-            id: id,
-            threadID: threadID,
-            role: role == .user ? .user : .assistant,
-            text: text,
-            createdAt: createdAt
+struct CoachScreen: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var model: ChatModel
+    private let initialPrompt: String?
+
+    init(
+        backend: BackendAPIClient,
+        feedbackContext: PersonalizationContext,
+        initialPrompt: String? = nil
+    ) {
+        _model = State(initialValue: ChatModel(backend: backend, feedbackContext: feedbackContext))
+        self.initialPrompt = initialPrompt
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 18) {
+                        if model.messages.isEmpty {
+                            emptyState
+                        }
+                        ForEach(model.messages) { message in
+                            messageRow(message)
+                                .id(message.id)
+                        }
+                        if model.isSending {
+                            HStack(spacing: 9) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Собираю контекст и проверяю ссылки на данные")
+                                    .font(.subheadline)
+                                    .foregroundStyle(BaselineTheme.secondary)
+                            }
+                            .padding(.vertical, 8)
+                            .id("loading")
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 20)
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: model.messages.count) { _, _ in
+                    guard let id = model.messages.last?.id else { return }
+                    withAnimation(BaselineTheme.standardAnimation) {
+                        proxy.scrollTo(id, anchor: .bottom)
+                    }
+                }
+                .onChange(of: model.isSending) { _, value in
+                    guard value else { return }
+                    withAnimation(BaselineTheme.standardAnimation) {
+                        proxy.scrollTo("loading", anchor: .bottom)
+                    }
+                }
+            }
+            .baselinePage()
+            .navigationTitle("Coach")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Готово") { dismiss() }
+                }
+            }
+            .safeAreaInset(edge: .bottom) { composer }
+            .task {
+                guard let initialPrompt, model.messages.isEmpty else { return }
+                await model.send(initialPrompt)
+            }
+            .alert("Ошибка", isPresented: errorBinding) {
+                Button("Закрыть") { model.errorMessage = nil }
+            } message: {
+                Text(model.errorMessage ?? "Неизвестная ошибка")
+            }
+        }
+    }
+
+    private var errorBinding: Binding<Bool> {
+        Binding(
+            get: { model.errorMessage != nil },
+            set: { if !$0 { model.errorMessage = nil } }
         )
+    }
+
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Разбор по вашим данным")
+                .font(.system(size: 28, weight: .semibold, design: .rounded))
+            Text("Coach получает сохранённые сессии, явный RPE, последние наблюдения еды и состояние персонализации. При пробеле в данных он должен сказать об этом, а не додумывать.")
+                .font(.body)
+                .foregroundStyle(BaselineTheme.secondary)
+                .lineSpacing(3)
+            VStack(spacing: 10) {
+                suggestion("Разбери последнюю тренировку")
+                suggestion("Что сейчас важнее: нагрузка или восстановление?")
+                suggestion("Каких данных тебе не хватает для полезного вывода?")
+            }
+        }
+        .padding(.top, 36)
+    }
+
+    private func suggestion(_ text: String) -> some View {
+        Button {
+            Task { await model.send(text) }
+        } label: {
+            HStack {
+                Text(text)
+                    .multilineTextAlignment(.leading)
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .foregroundStyle(BaselineTheme.secondary)
+            }
+        }
+        .buttonStyle(BaselineSecondaryButtonStyle())
+    }
+
+    @ViewBuilder
+    private func messageRow(_ message: CoachMessage) -> some View {
+        if message.role == .user {
+            Text(message.text)
+                .font(.body)
+                .padding(.horizontal, 15)
+                .padding(.vertical, 11)
+                .background(BaselineTheme.accentSoft, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .textSelection(.enabled)
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 10) {
+                    Text("B")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(BaselineTheme.ink, in: Circle())
+                    Text(message.text)
+                        .font(.body)
+                        .lineSpacing(4)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if message.recommendationCategory != nil,
+                   message.recommendationCategory != "none" {
+                    HStack(spacing: 10) {
+                        Text("Полезно?")
+                            .font(.caption)
+                            .foregroundStyle(BaselineTheme.secondary)
+                        ratingButton(systemName: "hand.thumbsup", value: 1, message: message)
+                        ratingButton(systemName: "hand.thumbsdown", value: -1, message: message)
+                    }
+                    .padding(.leading, 38)
+                }
+            }
+        }
+    }
+
+    private func ratingButton(systemName: String, value: Int, message: CoachMessage) -> some View {
+        Button {
+            Task { await model.rate(messageID: message.id, useful: value == 1) }
+        } label: {
+            Image(systemName: message.rating == value ? "\(systemName).fill" : systemName)
+                .frame(width: 30, height: 30)
+                .background(BaselineTheme.surface, in: Circle())
+                .overlay { Circle().stroke(BaselineTheme.border, lineWidth: 1) }
+        }
+        .foregroundStyle(message.rating == value ? BaselineTheme.accent : BaselineTheme.secondary)
+        .disabled(message.rating != nil)
+        .accessibilityLabel(value == 1 ? "Полезно" : "Не полезно")
+    }
+
+    private var composer: some View {
+        @Bindable var bindableModel = model
+        return HStack(alignment: .bottom, spacing: 10) {
+            TextField("Сообщение Coach", text: $bindableModel.draft, axis: .vertical)
+                .lineLimit(1...5)
+                .submitLabel(.send)
+                .onSubmit { Task { await model.send() } }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(BaselineTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(BaselineTheme.border, lineWidth: 1)
+                }
+            Button {
+                Task { await model.send() }
+            } label: {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(BaselineTheme.accent, in: Circle())
+            }
+            .disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isSending)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .background(BaselineTheme.canvas)
     }
 }
