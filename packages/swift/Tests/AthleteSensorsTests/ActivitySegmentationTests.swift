@@ -111,6 +111,24 @@ func rejectsShortActivity() throws {
     #expect(summary.setCount == 0)
 }
 
+@Test("1.2 секунды подготовки не становятся активным блоком")
+func rejectsLongPreparation() throws {
+    let summary = try ActivitySegmenter(configuration: .test).segment(
+        Array(repeating: ActivityWindow(duration: 0.2, normalizedJointVelocity: 0.8, movingJointFraction: 0.8, boundingBoxMotion: 0, trackingAvailable: true), count: 6)
+        + Array(repeating: ActivityWindow(duration: 0.4, normalizedJointVelocity: 0.1, movingJointFraction: 0.1, boundingBoxMotion: 0, trackingAvailable: true), count: 5)
+    )
+    #expect(summary.setCount == 0)
+}
+
+@Test("2.5 секунды устойчивой артикуляции становятся одним активным блоком")
+func acceptsSustainedActivity() throws {
+    let summary = try ActivitySegmenter(configuration: .test).segment(
+        Array(repeating: ActivityWindow(duration: 0.5, normalizedJointVelocity: 0.8, movingJointFraction: 0.8, boundingBoxMotion: 0, trackingAvailable: true), count: 5)
+        + Array(repeating: ActivityWindow(duration: 0.5, normalizedJointVelocity: 0.1, movingJointFraction: 0.1, boundingBoxMotion: 0, trackingAvailable: true), count: 4)
+    )
+    #expect(summary.setCount == 1)
+}
+
 private extension ActivitySegmentationConfiguration {
     static let test = ActivitySegmentationConfiguration(
         enterVelocity: 0.6,

@@ -23,6 +23,15 @@ func togglesCameraPosition() {
     #expect(CaptureCameraPosition.back.toggled == .front)
 }
 
+@Test("Food bbox переводится из Vision bottom-left в aspect-fill preview")
+func convertsFoodAspectFillGeometry() {
+    let rect = AspectFillGeometry.displayRect(normalizedVisionRect: NormalizedFoodRect(x: 0.1, y: 0.25, width: 0.25, height: 0.25), sourceSize: CGSize(width: 4, height: 3), previewSize: CGSize(width: 16, height: 9), mirrored: false)
+    let mirrored = AspectFillGeometry.displayRect(normalizedVisionRect: NormalizedFoodRect(x: 0.1, y: 0.25, width: 0.25, height: 0.25), sourceSize: CGSize(width: 4, height: 3), previewSize: CGSize(width: 16, height: 9), mirrored: true)
+    #expect(rect.width == 4)
+    #expect(rect.minY == mirrored.minY)
+    #expect(rect.minX + mirrored.maxX == 16)
+}
+
 @Test("Локальный gate не запускает классификацию чаще заданного интервала")
 func throttlesFoodClassification() {
     var gate = FoodFrameGate(evaluationInterval: 1.5)

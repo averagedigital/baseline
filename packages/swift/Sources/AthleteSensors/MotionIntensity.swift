@@ -96,8 +96,11 @@ public struct MotionIntensityEstimator: Sendable {
     private var previousTimestamp: TimeInterval?
     private var previousTrackID: UUID?
     private var validFrameCount = 0
-    private var robustWindow: [Double] = []
+    private var intensityWindow: [Double] = []
+    private var velocityWindow: [Double] = []
+    private var movingFractionWindow: [Double] = []
     private var filter: OneEuroFilter
+    private var segmentationFilter = LowPassFilter()
 
     public init(configuration: MotionIntensityConfiguration = .init()) {
         self.configuration = configuration
@@ -114,8 +117,11 @@ public struct MotionIntensityEstimator: Sendable {
         previousTimestamp = nil
         previousTrackID = nil
         validFrameCount = 0
-        robustWindow.removeAll(keepingCapacity: true)
+        intensityWindow.removeAll(keepingCapacity: true)
+        velocityWindow.removeAll(keepingCapacity: true)
+        movingFractionWindow.removeAll(keepingCapacity: true)
         filter.reset()
+        segmentationFilter.reset()
     }
 
     public mutating func update(frame: PoseFrame) -> MotionMetrics {
@@ -188,18 +194,19 @@ public struct MotionIntensityEstimator: Sendable {
                 + 0.22 * movingFraction
                 + 0.04 * normalizedBoxMotion
         )
-        let clipped = robustClip(rawIntensity)
+        let clipped = robustClip(rawIntensity, window: intensityWindow, hardMaximum: configuration.maximumIntensity)
         let filtered = min(
             filter.update(value: clipped, timestamp: frame.capturedAt),
             configuration.maximumIntensity
         )
-        let robustVelocity = robustClip(normalizedVelocity)
-        let segmentationScore = min(max(0.65 * robustVelocity + 0.35 * movingFraction, 0), 1)
+        let robustVelocity = robustClip(normalizedVelocity, window: velocityWindow, hardMaximum: 1)
+        let robustMovingFraction = robustClip(movingFraction, window: movingFractionWindow, hardMaximum: 1)
+        let rawSegmentation = min(max(0.65 * robustVelocity + 0.35 * robustMovingFraction, 0), 1)
+        let segmentationScore = segmentationFilter.update(value: rawSegmentation, alpha: 0.35)
 
-        robustWindow.append(rawIntensity)
-        if robustWindow.count > configuration.robustWindowSize {
-            robustWindow.removeFirst(robustWindow.count - configuration.robustWindowSize)
-        }
+        append(rawIntensity, to: &intensityWindow)
+        append(normalizedVelocity, to: &velocityWindow)
+        append(movingFraction, to: &movingFractionWindow)
         validFrameCount += 1
         seed(with: frame)
 
@@ -239,18 +246,26 @@ public struct MotionIntensityEstimator: Sendable {
         previousBoundingBox = nil
         previousTimestamp = nil
         validFrameCount = 0
-        robustWindow.removeAll(keepingCapacity: true)
+        intensityWindow.removeAll(keepingCapacity: true)
+        velocityWindow.removeAll(keepingCapacity: true)
+        movingFractionWindow.removeAll(keepingCapacity: true)
         filter.reset()
+        segmentationFilter.reset()
         if !keepTrackID { previousTrackID = nil }
     }
 
-    private func robustClip(_ value: Double) -> Double {
-        guard robustWindow.count >= 7 else { return min(value, configuration.maximumIntensity) }
-        let center = median(robustWindow)
-        let absoluteDeviations = robustWindow.map { abs($0 - center) }
+    private func robustClip(_ value: Double, window: [Double], hardMaximum: Double) -> Double {
+        guard window.count >= 7 else { return min(value, hardMaximum) }
+        let center = median(window)
+        let absoluteDeviations = window.map { abs($0 - center) }
         let mad = median(absoluteDeviations) * 1.4826
         let allowance = max(0.06, configuration.robustMADMultiplier * mad)
-        return min(min(value, center + allowance), configuration.maximumIntensity)
+        return min(min(value, center + allowance), hardMaximum)
+    }
+
+    private func append(_ value: Double, to window: inout [Double]) {
+        window.append(value)
+        if window.count > configuration.robustWindowSize { window.removeFirst(window.count - configuration.robustWindowSize) }
     }
 }
 

@@ -36,6 +36,7 @@ extension View {
 }
 
 struct BaselinePrimaryButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 15, weight: .semibold))
@@ -46,12 +47,13 @@ struct BaselinePrimaryButtonStyle: ButtonStyle {
                 BaselineTheme.accent.opacity(configuration.isPressed ? 0.82 : 1),
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
             )
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .animation(BaselineTheme.compactAnimation, value: configuration.isPressed)
+            .scaleEffect(reduceMotion ? 1 : (configuration.isPressed ? 0.985 : 1))
+            .animation(reduceMotion ? nil : BaselineTheme.compactAnimation, value: configuration.isPressed)
     }
 }
 
 struct BaselineSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 15, weight: .semibold))
@@ -64,6 +66,6 @@ struct BaselineSecondaryButtonStyle: ButtonStyle {
                     .stroke(BaselineTheme.border, lineWidth: 1)
             }
             .opacity(configuration.isPressed ? 0.72 : 1)
-            .animation(BaselineTheme.compactAnimation, value: configuration.isPressed)
+            .animation(reduceMotion ? nil : BaselineTheme.compactAnimation, value: configuration.isPressed)
     }
 }

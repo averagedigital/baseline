@@ -19,9 +19,16 @@ enum CaptureCameraPosition: Sendable, Equatable {
 }
 
 final class CameraPipeline: NSObject, @unchecked Sendable {
+    struct FoodFrameResult: Sendable {
+        let objects: [TrackedFoodObject]
+        let sourceSize: CGSize
+        let timestamp: TimeInterval
+    }
     let session = AVCaptureSession()
     var onFrame: (@Sendable (PoseFrame) -> Void)?
     var onFoodCandidate: (@Sendable ([FoodDetection], Date) -> Void)?
+    var onFoodObjects: (@Sendable (FoodFrameResult) -> Void)?
+    var onFoodAvailability: (@Sendable (FoodObjectDetector.Availability) -> Void)?
     var onError: (@Sendable (String) -> Void)?
 
     private let queue = DispatchQueue(label: "org.averagedigital.baseline.camera", qos: .userInitiated)
@@ -29,6 +36,7 @@ final class CameraPipeline: NSObject, @unchecked Sendable {
     private let output = AVCaptureVideoDataOutput()
     private let bodyRequest = VNDetectHumanBodyPoseRequest()
     private let foodDetector = FoodObjectDetector()
+    private let appearanceExtractor: any AppearanceSignatureExtracting = AppearanceSignatureExtractor()
     private var tracker = PrimarySubjectTracker()
     private var smoother = PoseSmoother(alpha: 0.24)
     private var foodGate = FoodFrameGate()
@@ -42,6 +50,7 @@ final class CameraPipeline: NSObject, @unchecked Sendable {
     private var foodScanEnabled = true
     private var foodDetectionInFlight = false
     private var foodTracker = FoodDetectionTracker()
+    private var foodAvailabilityPublished = false
 
     func start() async throws {
         try await withCheckedThrowingContinuation { continuation in
@@ -185,7 +194,7 @@ extension CameraPipeline: AVCaptureVideoDataOutputSampleBufferDelegate {
         do {
             try VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
                 .perform([bodyRequest])
-            let candidates = try (bodyRequest.results ?? []).compactMap { try makeCandidate($0) }
+            let candidates = try (bodyRequest.results ?? []).compactMap { try makeCandidate($0, pixelBuffer: pixelBuffer) }
             let result = tracker.update(candidates: candidates)
             let geometry = CameraGeometry(isMirrored: cameraPosition == .front)
 
@@ -244,6 +253,11 @@ extension CameraPipeline: AVCaptureVideoDataOutputSampleBufferDelegate {
                 guard let self else { return }
                 self.foodDetectionInFlight = false
                 let tracked = self.foodTracker.update(detections, at: timestamp)
+                if !self.foodAvailabilityPublished {
+                    self.foodAvailabilityPublished = true
+                    self.onFoodAvailability?(self.foodDetector.availability)
+                }
+                self.onFoodObjects?(FoodFrameResult(objects: tracked, sourceSize: CGSize(width: CVPixelBufferGetWidth(box.value), height: CVPixelBufferGetHeight(box.value)), timestamp: timestamp))
                 guard self.foodScanEnabled, self.foodGate.consume(observations: tracked.map { FoodDetection(id: $0.id, label: $0.label, confidence: $0.confidence, boundingBox: $0.boundingBox) }, at: timestamp) else {
                     return
                 }
@@ -252,7 +266,7 @@ extension CameraPipeline: AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
 
-    private func makeCandidate(_ observation: VNHumanBodyPoseObservation) throws -> PoseCandidate? {
+    private func makeCandidate(_ observation: VNHumanBodyPoseObservation, pixelBuffer: CVPixelBuffer) throws -> PoseCandidate? {
         let points = try observation.recognizedPoints(.all)
         let samples = jointMap.compactMap { joint, visionJoint -> PoseSample? in
             guard let point = points[visionJoint], point.confidence > 0.2 else { return nil }
@@ -265,7 +279,8 @@ extension CameraPipeline: AVCaptureVideoDataOutputSampleBufferDelegate {
                 )
             )
         }
-        return PoseCandidate(samples: samples)
+        guard let base = PoseCandidate(samples: samples) else { return nil }
+        return PoseCandidate(samples: base.samples, boundingBox: base.boundingBox, averageConfidence: base.averageConfidence, appearanceSignature: appearanceExtractor.signature(pixelBuffer: pixelBuffer, boundingBox: base.boundingBox))
     }
 
     private var jointMap: [(PoseJoint, VNHumanBodyPoseObservation.JointName)] {

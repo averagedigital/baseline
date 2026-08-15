@@ -10,7 +10,7 @@ struct FoodFrameGate: Sendable {
     private var positiveFrames = 0
 
     init(
-        evaluationInterval: TimeInterval = 1.5,
+        evaluationInterval: TimeInterval = 0.2,
         uploadCooldown: TimeInterval = 20,
         requiredPositiveFrames: Int = 2
     ) {

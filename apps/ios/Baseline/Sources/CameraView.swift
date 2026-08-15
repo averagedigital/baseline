@@ -76,6 +76,8 @@ final class CameraModel {
     var cameraPosition: CaptureCameraPosition = .front
     var foodScanEnabled = true
     var foodPhase: FoodScanPhase = .watching
+    var foodObjects: [TrackedFoodObject] = []
+    var foodSourceSize: CGSize = .zero
     var latestFood: LocalFoodAnalysis?
     var localHome: LocalHome?
     var lastSession: SessionSummaryViewData?
@@ -94,6 +96,7 @@ final class CameraModel {
     private var lastFrameTimestamp: TimeInterval?
     private var lastLiveSummaryAt: TimeInterval = -.infinity
     private var foodRequestInFlight = false
+    private var captureQuality = WorkoutCaptureQualityAccumulator()
 
     init(
         pipeline: CameraPipeline = CameraPipeline(),
@@ -123,6 +126,19 @@ final class CameraModel {
         pipeline.onFoodCandidate = { [weak self] detections, capturedAt in
             Task { @MainActor in
                 await self?.analyzeFood(detections: detections, capturedAt: capturedAt)
+            }
+        }
+        pipeline.onFoodObjects = { [weak self] result in
+            Task { @MainActor in
+                guard let self else { return }
+                self.foodObjects = result.objects
+                self.foodSourceSize = result.sourceSize
+            }
+        }
+        pipeline.onFoodAvailability = { [weak self] availability in
+            Task { @MainActor in
+                guard let self else { return }
+                if availability != .available { self.foodPhase = .unavailable }
             }
         }
         pipeline.onError = { [weak self] message in
@@ -157,8 +173,8 @@ final class CameraModel {
     }
 
     var latestFoodCalories: String? {
-        guard let latestFood, latestFood.containsFood else { return nil }
-        return "≈ \(Int(latestFood.caloriesLow.rounded()))–\(Int(latestFood.caloriesHigh.rounded())) ккал"
+        guard let latestFood, latestFood.containsFood, let low = latestFood.caloriesLow, let high = latestFood.caloriesHigh else { return nil }
+        return "≈ \(Int(low.rounded()))–\(Int(high.rounded())) ккал"
     }
 
     func startCamera() async {
@@ -217,6 +233,7 @@ final class CameraModel {
             foodPhase = .watching
         } else {
             latestFood = nil
+            foodObjects = []
         }
     }
 
@@ -225,6 +242,7 @@ final class CameraModel {
         isWorkoutRecording = true
         sessionStartedAt = Date()
         activityWindows = []
+        captureQuality = WorkoutCaptureQualityAccumulator()
         lastFrameTimestamp = nil
         lastLiveSummaryAt = -.infinity
         liveSetCount = 0
@@ -263,7 +281,7 @@ final class CameraModel {
                 activeBlockCount: summary.setCount,
                 confirmedSetCount: nil,
                 segments: summary.segments.map { SessionActivitySegment(state: $0.state, startOffset: $0.start, endOffset: $0.end) },
-                captureQuality: SessionCaptureQuality(trackingGapCount: summary.segments.filter { $0.state == .trackingGap }.count),
+                captureQuality: SessionCaptureQuality(ambiguousFrameCount: captureQuality.ambiguousFrameCount, identityDiscontinuityCount: captureQuality.identityDiscontinuityCount, warmupFrameCount: captureQuality.warmupFrameCount, rejectedMotionFrameCount: captureQuality.rejectedMotionFrameCount, trackingGapCount: summary.segments.filter { $0.state == .trackingGap }.count),
                 algorithmVersion: "activity-segmentation-v2"
             )
             let envelope = try session.envelope(ingestedAt: endedAt)
@@ -289,7 +307,10 @@ final class CameraModel {
                 trackingCoverage: summary.coverage,
                 sevenDayActiveMinutes: summary.activeTime / 60,
                 hoursSincePreviousSession: 72,
-                recentFoodKcalMidpoint: latestFood.map { ($0.caloriesLow + $0.caloriesHigh) / 2 } ?? 0
+                recentFoodKcalMidpoint: latestFood.flatMap { food in
+                    guard let low = food.caloriesLow, let high = food.caloriesHigh else { return nil }
+                    return (low + high) / 2
+                } ?? 0
             )
             pendingFeedback = PendingSessionFeedback(
                 feedbackEventID: UUID(),
@@ -375,6 +396,7 @@ final class CameraModel {
 
         let metrics = intensityEstimator.update(frame: frame)
         currentMetrics = metrics
+        if isWorkoutRecording { captureQuality.record(frame: frame, metrics: metrics) }
         intensityHistory.append(metrics.isValid ? metrics.intensity : nil, at: frame.capturedAt)
         recordActivity(frame: frame, metrics: metrics)
     }
@@ -472,6 +494,7 @@ struct CameraCard: View {
                     boundingBox: model.boundingBox,
                     state: model.trackingState
                 )
+                FoodDetectionOverlay(objects: model.foodObjects, sourceSize: model.foodSourceSize, isMirrored: model.cameraPosition == .front)
 
                 VStack {
                     HStack {
@@ -615,12 +638,17 @@ struct LatestFoodCard: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(BaselineTheme.danger)
                 }
-                Text("Диапазон, а не точное число: порция оценивается по одному RGB-кадру.")
+                Text("Размер порции не оценён. Для калорий нужно уточнить граммы.")
                     .font(.caption)
                     .foregroundStyle(BaselineTheme.secondary)
             } else {
                 Text(model.latestFoodTitle)
                     .font(.system(size: 15, weight: .medium))
+                if !model.foodObjects.isEmpty {
+                    Text("Продукт распознан. Для калорий нужно уточнить размер порции.")
+                        .font(.caption)
+                        .foregroundStyle(BaselineTheme.secondary)
+                }
                 Text("Изображения камеры обрабатываются в памяти и не сохраняются.")
                     .font(.caption)
                     .foregroundStyle(BaselineTheme.secondary)
@@ -716,6 +744,9 @@ private struct TrackingStatusPill: View {
             withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
                 highlighted = true
             }
+        }
+        .onChange(of: reduceMotion) { _, value in
+            if value { highlighted = false }
         }
     }
 }

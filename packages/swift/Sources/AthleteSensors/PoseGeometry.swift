@@ -313,13 +313,13 @@ public struct PrimarySubjectTracker: Sendable {
             return holdOrLose(reason: .ambiguousSubjects)
         }
 
-        self.lastCandidate = best.candidate
         holdFrames = 0
         let quality = TrackingQualityClassifier().classifyLocked(
             sampleCount: best.candidate.samples.count,
             averageConfidence: best.candidate.averageConfidence
         )
         let eligible = quality == .stable || quality == .degraded
+        if quality == .stable { self.lastCandidate = best.candidate }
         return SubjectTrackingResult(
             candidate: best.candidate,
             trackID: activeTrackID,

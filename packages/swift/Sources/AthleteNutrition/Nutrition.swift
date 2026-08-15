@@ -35,12 +35,19 @@ public struct NutritionDatabase: Sendable {
 
     public func match(_ label: String) -> NutritionItem? {
         let normalized = Self.normalize(label)
-        return items.first { item in
-            ([item.canonicalName] + item.aliases).contains { Self.normalize($0) == normalized }
-        } ?? items.first { item in
-            let tokens = Set(normalized.split(separator: " "))
-            return !tokens.isEmpty && tokens.isSubset(of: Set(Self.normalize(item.canonicalName).split(separator: " ")))
-        }
+        let queryTokens = Set(normalized.split(separator: " "))
+        guard !queryTokens.isEmpty else { return nil }
+        return items.compactMap { item -> (NutritionItem, Double)? in
+            let canonical = Self.normalize(item.canonicalName)
+            if canonical == normalized { return (item, 1) }
+            if item.aliases.contains(where: { Self.normalize($0) == normalized }) { return (item, 0.98) }
+            let candidateTokens = Set(canonical.split(separator: " "))
+            let coverage = Double(queryTokens.intersection(candidateTokens).count) / Double(queryTokens.count)
+            let union = queryTokens.union(candidateTokens).count
+            let jaccard = union == 0 ? 0 : Double(queryTokens.intersection(candidateTokens).count) / Double(union)
+            let score = 0.65 * coverage + 0.35 * jaccard
+            return score >= 0.62 ? (item, score) : nil
+        }.max { $0.1 < $1.1 }?.0
     }
 
     public func calories(for item: NutritionItem, gramsLow: Double?, gramsHigh: Double?) -> MealCalories? {

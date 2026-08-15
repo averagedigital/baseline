@@ -93,7 +93,10 @@ struct AppShell: View {
                 trackingCoverage: session.trackingCoverage,
                 sevenDayActiveMinutes: session.activeMinutes,
                 hoursSincePreviousSession: 72,
-                recentFoodKcalMidpoint: model.latestFood.map { ($0.caloriesLow + $0.caloriesHigh) / 2 } ?? 0
+                recentFoodKcalMidpoint: model.latestFood.flatMap { food in
+                    guard let low = food.caloriesLow, let high = food.caloriesHigh else { return nil }
+                    return (low + high) / 2
+                } ?? 0
             )
         }
         return PersonalizationContext(

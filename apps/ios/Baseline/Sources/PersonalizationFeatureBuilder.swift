@@ -7,7 +7,7 @@ struct PersonalizationFeatureBuilder: Sendable {
     let store: AthleteStore
 
     func features(for sessionEvidenceID: UUID) async throws -> PersonalizationFeatures {
-        guard let sourceEnvelope = try await store.evidence(id: sessionEvidenceID),
+        guard try await store.evidence(id: sessionEvidenceID) != nil,
               let source = try await store.payload(for: sessionEvidenceID, as: SessionEvidenceV2.self) else {
             throw AthleteStoreError.invalidIdentifier(sessionEvidenceID.uuidString)
         }
@@ -25,7 +25,8 @@ struct PersonalizationFeatureBuilder: Sendable {
         }.prefix(7)
         let nutritionSignal = eligibleFoods.reduce(0.0) { total, observation in
             guard let analysis = try? JSONDecoder().decode(LocalFoodAnalysis.self, from: observation.payload) else { return total }
-            return total + (analysis.caloriesLow + analysis.caloriesHigh) / 2
+            guard let low = analysis.caloriesLow, let high = analysis.caloriesHigh else { return total }
+            return total + (low + high) / 2
         }
         return PersonalizationFeatures(
             activeMinutes: source.activeTime / 60,

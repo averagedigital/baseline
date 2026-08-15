@@ -3,6 +3,7 @@ import CoreML
 import Vision
 
 struct FoodObjectDetector: @unchecked Sendable {
+    enum Availability: Equatable, Sendable { case available, modelMissing, invalid }
     enum DetectorError: LocalizedError {
         case modelMissing
         case modelInvalid
@@ -16,15 +17,18 @@ struct FoodObjectDetector: @unchecked Sendable {
     }
 
     private let model: VNCoreMLModel?
+    let availability: Availability
 
     init(bundle: Bundle = .main) {
         guard let url = bundle.url(forResource: "FoodDetector", withExtension: "mlmodelc"),
               let coreMLModel = try? MLModel(contentsOf: url),
               let visionModel = try? VNCoreMLModel(for: coreMLModel) else {
             model = nil
+            availability = bundle.url(forResource: "FoodDetector", withExtension: "mlmodelc") == nil ? .modelMissing : .invalid
             return
         }
         model = visionModel
+        availability = .available
     }
 
     func detect(pixelBuffer: CVPixelBuffer) throws -> [FoodDetection] {

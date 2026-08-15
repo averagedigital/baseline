@@ -19,7 +19,7 @@ let package = Package(
     targets: [
         .target(name: "AthleteCore"),
         .target(name: "AthleteSensors", dependencies: ["AthleteCore"]),
-        .target(name: "AthleteNutrition"),
+        .target(name: "AthleteNutrition", dependencies: [.product(name: "GRDB", package: "GRDB.swift")]),
         .target(name: "AthletePersonalization"),
         .target(name: "AthleteIntelligence", dependencies: ["AthleteCore"]),
         .target(

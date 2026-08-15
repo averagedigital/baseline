@@ -1,3 +1,4 @@
+import AthleteCore
 import Foundation
 import GRDB
 
@@ -36,6 +37,29 @@ public struct StoredFoodObservation: Codable, Equatable, Sendable {
 }
 
 extension AthleteStore {
+    public func applySessionRPE(eventID: UUID, sourceEvidenceID: UUID, feedbackPayload: Data, createdAt: Date, statePayload: Data, narrativeEnvelope: EvidenceEnvelope, narrativePayload: Data) throws -> Bool {
+        try database.write { db in
+            guard try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM evidence_events WHERE id = ?)", arguments: [sourceEvidenceID.uuidString]) ?? false else { throw AthleteStoreError.invalidIdentifier(sourceEvidenceID.uuidString) }
+            guard !(try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM feedback_events WHERE id = ?)", arguments: [eventID.uuidString]) ?? false) else { return false }
+            try db.execute(sql: "INSERT INTO feedback_events (id, kind, payload, created_at) VALUES (?, ?, ?, ?)", arguments: [eventID.uuidString, "session.rpe", feedbackPayload, createdAt])
+            try Self.insert(narrativeEnvelope, in: db)
+            try db.execute(sql: "INSERT INTO evidence_payloads (evidence_id, payload) VALUES (?, ?)", arguments: [narrativeEnvelope.id.uuidString, narrativePayload])
+            try db.execute(sql: "INSERT INTO personalization_state (id, payload, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at", arguments: ["personalization-v1", statePayload, createdAt])
+            return true
+        }
+    }
+
+    public func applyRecommendationReward(exposureID: UUID, reward: Double, feedbackEventID: UUID, feedbackPayload: Data, createdAt: Date, statePayload: Data) throws -> Bool {
+        try database.write { db in
+            guard let row = try Row.fetchOne(db, sql: "SELECT rewarded FROM recommendation_exposures WHERE id = ?", arguments: [exposureID.uuidString]) else { throw AthleteStoreError.invalidIdentifier(exposureID.uuidString) }
+            guard !(row["rewarded"] as Bool) else { return false }
+            try db.execute(sql: "UPDATE recommendation_exposures SET rewarded = ?, rewarded_at = ?, reward = ? WHERE id = ?", arguments: [true, createdAt, reward, exposureID.uuidString])
+            try db.execute(sql: "INSERT INTO feedback_events (id, kind, payload, created_at) VALUES (?, ?, ?, ?)", arguments: [feedbackEventID.uuidString, "recommendation.reward", feedbackPayload, createdAt])
+            try db.execute(sql: "INSERT INTO personalization_state (id, payload, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at", arguments: ["personalization-v1", statePayload, createdAt])
+            return true
+        }
+    }
+
     public func loadPersonalizationState<State: Decodable>(as type: State.Type) throws -> State? {
         try database.read { db in
             guard let data = try Data.fetchOne(db, sql: "SELECT payload FROM personalization_state WHERE id = ?", arguments: ["personalization-v1"]) else { return nil }

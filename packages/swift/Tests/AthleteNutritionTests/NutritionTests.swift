@@ -19,3 +19,12 @@ import Testing
     #expect(result[0].id == first.id)
     #expect(result[0].boundingBox.x > first.boundingBox.x)
 }
+
+@Test func matcherRanksSemanticNameAndRejectsUnrelatedFood() {
+    let cooked = NutritionItem(canonicalName: "Rice, white, cooked", aliases: ["cooked rice"], kcalPer100g: 130)
+    let flour = NutritionItem(canonicalName: "Rice flour", kcalPer100g: 366)
+    let db = NutritionDatabase(items: [flour, cooked])
+    #expect(db.match("white rice cooked") == cooked)
+    #expect(db.match("rice flour") == flour)
+    #expect(db.match("motor oil") == nil)
+}

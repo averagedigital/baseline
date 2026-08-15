@@ -36,7 +36,7 @@ public actor AthleteStore {
         }
     }
 
-    private static func insert(_ envelope: EvidenceEnvelope, in db: Database) throws {
+    static func insert(_ envelope: EvidenceEnvelope, in db: Database) throws {
         let payload = try JSONEncoder().encode(envelope)
         try db.execute(
             sql: """
