@@ -1,22 +1,29 @@
 # Baseline
 
-Baseline is an evidence-first iOS training companion with a lightweight realtime client and a heavier analytical backend.
+Baseline — fully on-device evidence-first training companion.
 
-## Repository layout
+## Stack
 
-- `apps/ios/Baseline` — camera, multi-person-safe subject lock, robust motion metrics, local evidence, compact white UI, food gate.
-- `apps/backend` — FastAPI, PostgreSQL, Alembic, food/nutrition analysis, Coach context, grounding, personalization.
-- `packages/swift` — shared domain, sensors, and local GRDB storage.
-- `docs/BASELINE_V2_ARCHITECTURE.md` — data flow, quality rules, privacy, API, and verification.
+- SwiftUI and AVFoundation;
+- Vision for local body pose;
+- CoreML/Vision adapters for optional local food detection;
+- Foundation Models when available;
+- GRDB/SQLite as the canonical local store;
+- local online personalization from explicit RPE and feedback.
 
-## Core invariants
+The app does not require a server, login, internet connection, API keys or cloud sync. Raw video and food image bytes are never persisted.
 
-- Never choose a person by Vision result order.
-- Never write ambiguous tracking frames into movement metrics.
-- Never store raw video or food image bytes.
-- Never expose provider API keys in the iOS bundle.
-- Never present a single-image food estimate as exact calories.
-- Never train personalization without explicit RPE or useful/not-useful feedback.
-- Never give Coach exact user-specific numbers without evidence references.
+## Modules
+
+- `AthleteSensors` — multi-person lock, appearance continuity, robust motion and activity segmentation;
+- `AthleteNutrition` — food detections, tracking contracts and local nutrition matching;
+- `AthletePersonalization` — explicit-feedback difficulty model and recommendation exposure;
+- `AthleteIntelligence` — local Coach contracts and grounding validation;
+- `AthleteStore` — GRDB evidence, history and migrations.
 
 ## Verification
+
+```bash
+cd packages/swift && swift test
+cd ../../apps/ios/Baseline && xcodegen generate
+```

@@ -35,7 +35,7 @@ struct AppShell: View {
         }
         .sheet(isPresented: $showsCoach) {
             CoachScreen(
-                backend: model.backend,
+                localServices: model.localServices,
                 feedbackContext: feedbackContext,
                 initialPrompt: coachPrompt
             )
@@ -213,12 +213,12 @@ private struct SettingsSheet: View {
 
                 Section("Приватность") {
                     Label("Видео не записывается", systemImage: "video.slash")
-                    Label("На backend уходят только компактные session evidence", systemImage: "waveform.path.ecg")
+                    Label("Session evidence хранится локально", systemImage: "waveform.path.ecg")
                     Label("JPEG еды отправляется после локального gate и не хранится", systemImage: "fork.knife")
                 }
 
                 Section("Архитектура") {
-                    Text("На устройстве: камера, фиксация человека, realtime-метрики и offline evidence. На backend: контекст, LLM, FoodData Central и персонализация.")
+                    Text("На устройстве: камера, фиксация человека, realtime-метрики, контекст, Coach и персонализация.")
                         .font(.footnote)
                         .foregroundStyle(BaselineTheme.secondary)
                 }

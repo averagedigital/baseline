@@ -74,8 +74,8 @@ final class CameraModel {
     var cameraPosition: CaptureCameraPosition = .front
     var foodScanEnabled = true
     var foodPhase: FoodScanPhase = .watching
-    var latestFood: BackendFoodAnalysis?
-    var backendHome: BackendHome?
+    var latestFood: LocalFoodAnalysis?
+    var localHome: LocalHome?
     var lastSession: SessionSummaryViewData?
     var pendingFeedback: PendingSessionFeedback?
     var errorMessage: String?
@@ -83,7 +83,7 @@ final class CameraModel {
     var recordingElapsed: TimeInterval = 0
 
     let pipeline: CameraPipeline
-    let backend: BackendAPIClient
+    let localServices: LocalDeviceServices
 
     private let store: AthleteStore?
     private var intensityEstimator = MotionIntensityEstimator()
@@ -96,10 +96,10 @@ final class CameraModel {
     init(
         pipeline: CameraPipeline = CameraPipeline(),
         store: AthleteStore? = nil,
-        backend: BackendAPIClient = BackendAPIClient()
+        localServices: LocalDeviceServices = LocalDeviceServices()
     ) {
         self.pipeline = pipeline
-        self.backend = backend
+        self.localServices = localServices
         if let store {
             self.store = store
         } else {
@@ -257,11 +257,11 @@ final class CameraModel {
                 try await store.appendEvidence(envelope, payload: session)
             }
 
-            var backendError: Error?
+            var localError: Error?
             do {
-                try await backend.uploadEvidence(envelope: envelope, payload: session)
+                try await localServices.uploadEvidence(envelope: envelope, payload: session)
             } catch {
-                backendError = error
+                localError = error
             }
 
             let viewData = SessionSummaryViewData(
@@ -289,8 +289,8 @@ final class CameraModel {
                 summary: viewData
             )
             await refreshHome()
-            if let backendError {
-                errorMessage = "Тренировка сохранена локально, но backend пока недоступен: \(backendError.localizedDescription)"
+            if let localError {
+                errorMessage = "Тренировка сохранена локально, но localServices пока недоступен: \(localError.localizedDescription)"
             }
         } catch {
             errorMessage = "Не удалось сохранить тренировку: \(error.localizedDescription)"
@@ -299,7 +299,7 @@ final class CameraModel {
 
     func submitRPE(_ value: Double, note: String, for feedback: PendingSessionFeedback) async -> Bool {
         do {
-            _ = try await backend.sendSessionRPE(
+            _ = try await localServices.sendSessionRPE(
                 value: value,
                 sourceEvidenceID: feedback.evidenceID,
                 note: note,
@@ -316,8 +316,8 @@ final class CameraModel {
 
     func refreshHome() async {
         do {
-            let value = try await backend.home()
-            backendHome = value
+            let value = try await localServices.home()
+            localHome = value
             if let session = value.latestSession,
                lastSession == nil || session.observedTo > (lastSession?.endedAt ?? .distantPast) {
                 lastSession = SessionSummaryViewData(
@@ -330,7 +330,7 @@ final class CameraModel {
                 )
             }
             if let food = value.latestFood {
-                latestFood = BackendFoodAnalysis(
+                latestFood = LocalFoodAnalysis(
                     containsFood: true,
                     stored: true,
                     duplicateOf: nil,
@@ -352,7 +352,7 @@ final class CameraModel {
             return
         }
         do {
-            try await backend.dismissFood(observationID: observationID)
+            try await localServices.dismissFood(observationID: observationID)
             latestFood = nil
             foodPhase = .watching
             await refreshHome()
@@ -405,7 +405,7 @@ final class CameraModel {
         foodPhase = .analyzing
         defer { foodRequestInFlight = false }
         do {
-            let result = try await backend.analyzeFood(jpeg: jpeg, capturedAt: capturedAt)
+            let result = try await localServices.analyzeFood(jpeg: jpeg, capturedAt: capturedAt)
             if result.containsFood {
                 latestFood = result
                 foodPhase = .watching
@@ -634,7 +634,7 @@ struct HomeInsightCard: View {
                 Text("Сейчас")
                     .font(.system(size: 17, weight: .semibold))
                 Spacer()
-                if let confidence = model.backendHome?.predictionConfidence, confidence > 0 {
+                if let confidence = model.localHome?.predictionConfidence, confidence > 0 {
                     Text("персонализация \(Int((confidence * 100).rounded()))%")
                         .font(.caption)
                         .foregroundStyle(BaselineTheme.secondary)
@@ -665,7 +665,7 @@ struct HomeInsightCard: View {
     }
 
     private var insightTitle: String {
-        switch model.backendHome?.suggestedAction {
+        switch model.localHome?.suggestedAction {
         case "technique": "Сфокусироваться на технике"
         case "load": "Сверить рабочую нагрузку"
         case "recovery": "Проверить восстановление"

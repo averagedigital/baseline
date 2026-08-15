@@ -40,12 +40,12 @@ final class ChatModel {
     var isSending = false
     var errorMessage: String?
 
-    private let backend: BackendAPIClient
+    private let localServices: LocalDeviceServices
     private let feedbackContext: PersonalizationContext
     private var threadID: UUID?
 
-    init(backend: BackendAPIClient, feedbackContext: PersonalizationContext) {
-        self.backend = backend
+    init(localServices: LocalDeviceServices, feedbackContext: PersonalizationContext) {
+        self.localServices = localServices
         self.feedbackContext = feedbackContext
     }
 
@@ -57,7 +57,7 @@ final class ChatModel {
         isSending = true
         errorMessage = nil
         do {
-            let response = try await backend.chat(threadID: threadID, message: text)
+            let response = try await localServices.chat(threadID: threadID, message: text)
             threadID = response.threadID
             messages.append(CoachMessage(
                 role: .assistant,
@@ -80,7 +80,7 @@ final class ChatModel {
         let value = useful ? 1 : -1
         messages[index].rating = value
         do {
-            _ = try await backend.sendRecommendationReward(
+            _ = try await localServices.sendRecommendationReward(
                 feedbackContextID: feedbackContextID,
                 reward: Double(value),
                 context: feedbackContext
@@ -98,11 +98,11 @@ struct CoachScreen: View {
     private let initialPrompt: String?
 
     init(
-        backend: BackendAPIClient,
+        localServices: LocalDeviceServices,
         feedbackContext: PersonalizationContext,
         initialPrompt: String? = nil
     ) {
-        _model = State(initialValue: ChatModel(backend: backend, feedbackContext: feedbackContext))
+        _model = State(initialValue: ChatModel(localServices: localServices, feedbackContext: feedbackContext))
         self.initialPrompt = initialPrompt
     }
 

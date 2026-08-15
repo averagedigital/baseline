@@ -1,4 +1,0 @@
-# Baseline backend
-
-## Local launch
-

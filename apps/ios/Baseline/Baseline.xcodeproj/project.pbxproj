@@ -8,17 +8,20 @@
 
 /* Begin PBXBuildFile section */
 		0FDD88AF3620C5C490369E33 /* SampleDashboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A7838FE09CC06FD091D9A4C /* SampleDashboardTests.swift */; };
+		1B0C4DAB229B0739EAC9C927 /* LocalDeviceServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16F83EDBAF598A7224A2DE0A /* LocalDeviceServices.swift */; };
 		2788367BE0D28844B09A5DB2 /* AthleteSensors in Frameworks */ = {isa = PBXBuildFile; productRef = DE8D28D7B1A50EC05F427F31 /* AthleteSensors */; };
-		3E8DF889FBA5799BE78A7A76 /* BackendAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B92E4FA76DE0B507FEC52FA /* BackendAPIClient.swift */; };
 		4831FEAE90CB66F844863B75 /* AppShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444EFEC840B90D25B3246576 /* AppShell.swift */; };
+		5DA49EC8D1D80B052CABBBC8 /* AthleteNutrition in Frameworks */ = {isa = PBXBuildFile; productRef = 27301A2025CD460E49D7B4B0 /* AthleteNutrition */; };
 		603F55226DB7422C69381DEF /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E55114F9CEDE340C6BD68CA /* CameraView.swift */; };
 		680C9E7216E051775620E86F /* BaselineApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC4E9AA70B1E388336CD0ED /* BaselineApp.swift */; };
+		89F4ECD03AD37EE47426CFC8 /* AthletePersonalization in Frameworks */ = {isa = PBXBuildFile; productRef = EC1E8B6B62284BC14AB578D9 /* AthletePersonalization */; };
 		BCE0B0A08B6A521F298EE7CA /* ChatModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93106080A48EEB56C6A64DAF /* ChatModel.swift */; };
 		C03425D115C3CE3C191AA0B5 /* BaselineTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = D943F4CB734A0DE13B02BED8 /* BaselineTheme.swift */; };
 		C654847562C8CBEEB8808918 /* StoreFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDDE1E754BFB6A694897C66D /* StoreFactory.swift */; };
 		C8785DD2C4810B8B74E2A659 /* CameraPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA264C8FAA0DD1EB9D630084 /* CameraPipeline.swift */; };
 		E82E2F3BFAC2914BD2959B91 /* AthleteStore in Frameworks */ = {isa = PBXBuildFile; productRef = 8DE0616B042A85FE7638C35F /* AthleteStore */; };
 		E8B98B74178A855552364738 /* AthleteCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5204AED981B0CD6645DCE74E /* AthleteCore */; };
+		F67AC21768C39A6757F22E28 /* AthleteIntelligence in Frameworks */ = {isa = PBXBuildFile; productRef = E4A021A31E67C469449A7D1C /* AthleteIntelligence */; };
 		F6FCC4017B4FBE8D13F6B011 /* FoodFrameGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C8D73966F7D51C8A20A7A0C /* FoodFrameGate.swift */; };
 /* End PBXBuildFile section */
 
@@ -33,8 +36,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		0B92E4FA76DE0B507FEC52FA /* BackendAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendAPIClient.swift; sourceTree = "<group>"; };
 		107DE3C058E79682566EDD74 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
+		16F83EDBAF598A7224A2DE0A /* LocalDeviceServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDeviceServices.swift; sourceTree = "<group>"; };
 		1C8D73966F7D51C8A20A7A0C /* FoodFrameGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodFrameGate.swift; sourceTree = "<group>"; };
 		444EFEC840B90D25B3246576 /* AppShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShell.swift; sourceTree = "<group>"; };
 		4A7838FE09CC06FD091D9A4C /* SampleDashboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleDashboardTests.swift; sourceTree = "<group>"; };
@@ -57,6 +60,9 @@
 				E8B98B74178A855552364738 /* AthleteCore in Frameworks */,
 				2788367BE0D28844B09A5DB2 /* AthleteSensors in Frameworks */,
 				E82E2F3BFAC2914BD2959B91 /* AthleteStore in Frameworks */,
+				5DA49EC8D1D80B052CABBBC8 /* AthleteNutrition in Frameworks */,
+				89F4ECD03AD37EE47426CFC8 /* AthletePersonalization in Frameworks */,
+				F67AC21768C39A6757F22E28 /* AthleteIntelligence in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -67,13 +73,13 @@
 			isa = PBXGroup;
 			children = (
 				444EFEC840B90D25B3246576 /* AppShell.swift */,
-				0B92E4FA76DE0B507FEC52FA /* BackendAPIClient.swift */,
 				8DC4E9AA70B1E388336CD0ED /* BaselineApp.swift */,
 				D943F4CB734A0DE13B02BED8 /* BaselineTheme.swift */,
 				BA264C8FAA0DD1EB9D630084 /* CameraPipeline.swift */,
 				6E55114F9CEDE340C6BD68CA /* CameraView.swift */,
 				93106080A48EEB56C6A64DAF /* ChatModel.swift */,
 				1C8D73966F7D51C8A20A7A0C /* FoodFrameGate.swift */,
+				16F83EDBAF598A7224A2DE0A /* LocalDeviceServices.swift */,
 				EDDE1E754BFB6A694897C66D /* StoreFactory.swift */,
 			);
 			path = Sources;
@@ -142,6 +148,9 @@
 				5204AED981B0CD6645DCE74E /* AthleteCore */,
 				DE8D28D7B1A50EC05F427F31 /* AthleteSensors */,
 				8DE0616B042A85FE7638C35F /* AthleteStore */,
+				27301A2025CD460E49D7B4B0 /* AthleteNutrition */,
+				EC1E8B6B62284BC14AB578D9 /* AthletePersonalization */,
+				E4A021A31E67C469449A7D1C /* AthleteIntelligence */,
 			);
 			productName = Baseline;
 			productReference = 917EC6C734FA7FDEF274FFAD /* Baseline.app */;
@@ -211,13 +220,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				4831FEAE90CB66F844863B75 /* AppShell.swift in Sources */,
-				3E8DF889FBA5799BE78A7A76 /* BackendAPIClient.swift in Sources */,
 				680C9E7216E051775620E86F /* BaselineApp.swift in Sources */,
 				C03425D115C3CE3C191AA0B5 /* BaselineTheme.swift in Sources */,
 				C8785DD2C4810B8B74E2A659 /* CameraPipeline.swift in Sources */,
 				603F55226DB7422C69381DEF /* CameraView.swift in Sources */,
 				BCE0B0A08B6A521F298EE7CA /* ChatModel.swift in Sources */,
 				F6FCC4017B4FBE8D13F6B011 /* FoodFrameGate.swift in Sources */,
+				1B0C4DAB229B0739EAC9C927 /* LocalDeviceServices.swift in Sources */,
 				C654847562C8CBEEB8808918 /* StoreFactory.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -393,12 +402,8 @@
 			baseConfigurationReference = 107DE3C058E79682566EDD74 /* Signing.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				BASELINE_API_TOKEN = "dev-only-change-me";
-				BASELINE_BACKEND_URL = "http://127.0.0.1:8000";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_BASELINE_API_TOKEN = "$(BASELINE_API_TOKEN)";
-				INFOPLIST_KEY_BASELINE_BACKEND_URL = "$(BASELINE_BACKEND_URL)";
 				INFOPLIST_KEY_CFBundleDisplayName = Baseline;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Камера используется для анализа позы и локального food-gate. Видео не записывается.";
@@ -424,8 +429,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_BASELINE_API_TOKEN = "$(BASELINE_API_TOKEN)";
-				INFOPLIST_KEY_BASELINE_BACKEND_URL = "$(BASELINE_BACKEND_URL)";
 				INFOPLIST_KEY_CFBundleDisplayName = Baseline;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Камера используется для анализа позы и локального food-gate. Видео не записывается.";
@@ -484,6 +487,10 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		27301A2025CD460E49D7B4B0 /* AthleteNutrition */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AthleteNutrition;
+		};
 		5204AED981B0CD6645DCE74E /* AthleteCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AthleteCore;
@@ -495,6 +502,14 @@
 		DE8D28D7B1A50EC05F427F31 /* AthleteSensors */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AthleteSensors;
+		};
+		E4A021A31E67C469449A7D1C /* AthleteIntelligence */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AthleteIntelligence;
+		};
+		EC1E8B6B62284BC14AB578D9 /* AthletePersonalization */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AthletePersonalization;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

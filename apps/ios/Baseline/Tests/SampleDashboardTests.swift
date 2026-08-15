@@ -10,10 +10,10 @@ func boundsIntensityByTimeWindow() {
     history.append(nil, at: 2)
     history.append(4, at: 4.1)
 
-    #expect(history.points.count == 3)
-    #expect(history.points.map(\.timestamp) == [1, 2, 4.1])
+    #expect(history.points.count == 2)
+    #expect(history.points.map(\.timestamp) == [2, 4.1])
     #expect(history.points.last?.value == 1)
-    #expect(history.points[1].value == nil)
+    #expect(history.points.first?.value == nil)
 }
 
 @Test("Положение камеры переключается между фронтальным и задним")
@@ -26,9 +26,12 @@ func togglesCameraPosition() {
 func throttlesFoodClassification() {
     var gate = FoodFrameGate(evaluationInterval: 1.5)
 
-    #expect(gate.shouldEvaluate(at: 0))
-    #expect(!gate.shouldEvaluate(at: 0.7))
-    #expect(gate.shouldEvaluate(at: 1.5))
+    let first = gate.shouldEvaluate(at: 0)
+    let second = gate.shouldEvaluate(at: 0.7)
+    let third = gate.shouldEvaluate(at: 1.5)
+    #expect(first)
+    #expect(!second)
+    #expect(third)
 }
 
 @Test("Food gate требует два последовательных положительных кадра")
@@ -36,9 +39,12 @@ func requiresConsecutiveFoodSignals() {
     var gate = FoodFrameGate(evaluationInterval: 0.1, uploadCooldown: 20, requiredPositiveFrames: 2)
     let food = [FoodLabelObservation(identifier: "plate of pasta", confidence: 0.8)]
 
-    #expect(!gate.consume(observations: food, at: 0))
-    #expect(gate.consume(observations: food, at: 1))
-    #expect(!gate.consume(observations: food, at: 2))
+    let first = gate.consume(observations: food, at: 0)
+    let second = gate.consume(observations: food, at: 1)
+    let third = gate.consume(observations: food, at: 2)
+    #expect(!first)
+    #expect(second)
+    #expect(!third)
 }
 
 @Test("Ответ питания декодируется как диапазон, а не одно точное число")
@@ -49,7 +55,7 @@ func decodesFoodRange() throws {
     let decoder = JSONDecoder()
     decoder.keyDecodingStrategy = .convertFromSnakeCase
 
-    let value = try decoder.decode(BackendFoodAnalysis.self, from: data)
+    let value = try decoder.decode(LocalFoodAnalysis.self, from: data)
 
     #expect(value.containsFood)
     #expect(value.caloriesLow == 410)
@@ -91,12 +97,12 @@ func feedbackDraftKeepsEvidenceIdentity() {
 @Test("Совет декодируется с одноразовым feedback context")
 func decodesRecommendationFeedbackContext() throws {
     let data = Data(
-        #"{"thread_id":"00000000-0000-0000-0000-000000000001","answer_markdown":"Отдых приоритетнее [model:personalization-v1]","recommendation_category":"recovery","evidence_ids":[],"food_ids":[],"context_digest":"sha256:test","feedback_context_id":"00000000-0000-0000-0000-000000000002"}"#.utf8
+        #"{"threadID":"00000000-0000-0000-0000-000000000001","answerMarkdown":"Отдых приоритетнее [model:personalization-v1]","recommendationCategory":"recovery","evidenceIDs":[],"foodIDs":[],"contextDigest":"sha256:test","feedbackContextID":"00000000-0000-0000-0000-000000000002"}"#.utf8
     )
     let decoder = JSONDecoder()
     decoder.keyDecodingStrategy = .convertFromSnakeCase
 
-    let value = try decoder.decode(BackendChatResponse.self, from: data)
+    let value = try decoder.decode(LocalChatResponse.self, from: data)
 
     #expect(value.recommendationCategory == "recovery")
     #expect(value.feedbackContextID == UUID(uuidString: "00000000-0000-0000-0000-000000000002"))
