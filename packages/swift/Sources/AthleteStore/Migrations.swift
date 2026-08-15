@@ -1,4 +1,5 @@
 import GRDB
+import Foundation
 
 extension AthleteStore {
     static var migrator: DatabaseMigrator {
@@ -123,6 +124,16 @@ extension AthleteStore {
                 table.column("thread_id", .text).notNull().indexed()
                 table.column("payload", .blob).notNull()
                 table.column("created_at", .datetime).notNull()
+            }
+        }
+        migrator.registerMigration("v5_persist_local_model_metadata") { db in
+            try db.alter(table: "recommendation_exposures") { table in
+                table.add(column: "created_at", .datetime).notNull().defaults(to: Date())
+                table.add(column: "rewarded_at", .datetime)
+                table.add(column: "reward", .double)
+            }
+            try db.alter(table: "food_observations") { table in
+                table.add(column: "dismissed", .boolean).notNull().defaults(to: false)
             }
         }
         return migrator

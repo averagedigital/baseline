@@ -66,14 +66,14 @@ extension AthleteStore {
 
     public func saveRecommendationExposure(_ exposure: StoredRecommendationExposure) throws {
         try database.write { db in
-            try db.execute(sql: "INSERT OR REPLACE INTO recommendation_exposures (id, payload, rewarded) VALUES (?, ?, ?)", arguments: [exposure.id.uuidString, exposure.payload, exposure.rewardedAt != nil])
+            try db.execute(sql: "INSERT OR REPLACE INTO recommendation_exposures (id, payload, created_at, rewarded, rewarded_at, reward) VALUES (?, ?, ?, ?, ?, ?)", arguments: [exposure.id.uuidString, exposure.payload, exposure.createdAt, exposure.rewardedAt != nil, exposure.rewardedAt, exposure.reward])
         }
     }
 
     public func recommendationExposure(id: UUID) throws -> StoredRecommendationExposure? {
         try database.read { db in
-            guard let row = try Row.fetchOne(db, sql: "SELECT payload, rewarded FROM recommendation_exposures WHERE id = ?", arguments: [id.uuidString]) else { return nil }
-            return StoredRecommendationExposure(id: id, payload: row["payload"], createdAt: Date(), rewardedAt: (row["rewarded"] as Bool) ? Date() : nil)
+            guard let row = try Row.fetchOne(db, sql: "SELECT payload, created_at, rewarded_at, reward FROM recommendation_exposures WHERE id = ?", arguments: [id.uuidString]) else { return nil }
+            return StoredRecommendationExposure(id: id, payload: row["payload"], createdAt: row["created_at"], rewardedAt: row["rewarded_at"], reward: row["reward"])
         }
     }
 
@@ -81,29 +81,29 @@ extension AthleteStore {
     public func markRecommendationExposureRewarded(id: UUID, reward: Double, at date: Date = Date()) throws -> Bool {
         try database.write { db in
             guard let rewarded: Bool = try Bool.fetchOne(db, sql: "SELECT rewarded FROM recommendation_exposures WHERE id = ?", arguments: [id.uuidString]), !rewarded else { return false }
-            try db.execute(sql: "UPDATE recommendation_exposures SET rewarded = ? WHERE id = ?", arguments: [true, id.uuidString])
+            try db.execute(sql: "UPDATE recommendation_exposures SET rewarded = ?, rewarded_at = ?, reward = ? WHERE id = ?", arguments: [true, date, reward, id.uuidString])
             return true
         }
     }
 
     public func saveFoodObservation(_ observation: StoredFoodObservation) throws {
         try database.write { db in
-            try db.execute(sql: "INSERT OR REPLACE INTO food_observations (id, payload, captured_at) VALUES (?, ?, ?)", arguments: [observation.id.uuidString, observation.payload, observation.capturedAt])
+            try db.execute(sql: "INSERT OR REPLACE INTO food_observations (id, payload, captured_at, dismissed) VALUES (?, ?, ?, ?)", arguments: [observation.id.uuidString, observation.payload, observation.capturedAt, observation.dismissed])
         }
     }
 
     public func recentFoodObservations(limit: Int = 20) throws -> [StoredFoodObservation] {
         try database.read { db in
-            try Row.fetchAll(db, sql: "SELECT id, payload, captured_at FROM food_observations ORDER BY captured_at DESC LIMIT ?", arguments: [max(1, limit)]).compactMap { row in
+            try Row.fetchAll(db, sql: "SELECT id, payload, captured_at, dismissed FROM food_observations ORDER BY captured_at DESC LIMIT ?", arguments: [max(1, limit)]).compactMap { row in
                 guard let id = UUID(uuidString: row["id"]) else { return nil }
-                return StoredFoodObservation(id: id, payload: row["payload"], capturedAt: row["captured_at"])
+                return StoredFoodObservation(id: id, payload: row["payload"], capturedAt: row["captured_at"], dismissed: row["dismissed"])
             }
         }
     }
 
     public func dismissFoodObservation(id: UUID) throws {
         try database.write { db in
-            try db.execute(sql: "UPDATE food_observations SET payload = ? WHERE id = ?", arguments: [Data("{\"dismissed\":true}".utf8), id.uuidString])
+            try db.execute(sql: "UPDATE food_observations SET dismissed = ? WHERE id = ?", arguments: [true, id.uuidString])
         }
     }
 }

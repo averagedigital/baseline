@@ -81,11 +81,21 @@ actor LocalDeviceServices {
         return LocalFeedbackResponse(stored: true, personalizationSamples: model.samples)
     }
 
-    func sendRecommendationReward(feedbackContextID: UUID, reward: Double, context: PersonalizationContext) async throws -> LocalFeedbackResponse { throw LocalCoachError.unavailable }
+    func sendRecommendationReward(feedbackContextID: UUID, reward: Double, context: PersonalizationContext) async throws -> LocalFeedbackResponse {
+        guard let store else { throw LocalStorageError.unavailable }
+        guard let stored = try await store.recommendationExposure(id: feedbackContextID) else { throw AthleteStoreError.invalidIdentifier(feedbackContextID.uuidString) }
+        let exposure = try JSONDecoder().decode(RecommendationExposure.self, from: stored.payload)
+        guard try await store.markRecommendationExposureRewarded(id: feedbackContextID, reward: reward) else { throw LocalStorageError.duplicate }
+        var bandit = try await store.loadPersonalizationState(as: LocalBanditState.self) ?? LocalBanditState()
+        let features = PersonalizationFeatures(activeMinutes: context.activeMinutes, setCount: Double(context.setCount), trackingCoverage: context.trackingCoverage, workRestRatio: context.workRestRatio, recentActiveMinutes: context.sevenDayActiveMinutes, hoursSincePrevious: context.hoursSincePreviousSession, nutritionSignal: context.recentFoodKcalMidpoint)
+        bandit.update(action: exposure.action, features: features, reward: reward)
+        try await store.savePersonalizationState(bandit, at: Date())
+        return LocalFeedbackResponse(stored: true, personalizationSamples: bandit.totalExplicitRewards)
+    }
     func dismissFood(observationID: UUID) async throws { guard let store else { throw LocalStorageError.unavailable }; try await store.dismissFoodObservation(id: observationID) }
 }
 
-enum LocalStorageError: LocalizedError { case unavailable; var errorDescription: String? { "Локальное хранилище недоступно." } }
+enum LocalStorageError: LocalizedError { case unavailable; case duplicate; var errorDescription: String? { switch self { case .unavailable: "Локальное хранилище недоступно."; case .duplicate: "Оценка этого совета уже сохранена." } } }
 enum FoodDetectorUnavailableError: LocalizedError {
     case modelMissing
     case nutritionDatabaseMissing
