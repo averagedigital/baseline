@@ -90,6 +90,21 @@ public actor AthleteStore {
         }
     }
 
+    public func evidenceEnvelopes(kind: String, observedBefore: Date? = nil, limit: Int = 100) throws -> [EvidenceEnvelope] {
+        try database.read { db in
+            let sql: String
+            let arguments: StatementArguments
+            if let observedBefore {
+                sql = "SELECT payload FROM evidence_events WHERE kind = ? AND observed_to <= ? ORDER BY observed_to DESC LIMIT ?"
+                arguments = [kind, observedBefore, max(1, limit)]
+            } else {
+                sql = "SELECT payload FROM evidence_events WHERE kind = ? ORDER BY observed_to DESC LIMIT ?"
+                arguments = [kind, max(1, limit)]
+            }
+            return try Data.fetchAll(db, sql: sql, arguments: arguments).map { try JSONDecoder().decode(EvidenceEnvelope.self, from: $0) }
+        }
+    }
+
     public func hasEvidence(kind: String, derivedFrom evidenceID: UUID) throws -> Bool {
         try database.read { db in
             try Bool.fetchOne(

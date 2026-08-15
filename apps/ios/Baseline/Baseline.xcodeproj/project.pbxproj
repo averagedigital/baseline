@@ -13,6 +13,7 @@
 		4831FEAE90CB66F844863B75 /* AppShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444EFEC840B90D25B3246576 /* AppShell.swift */; };
 		5DA49EC8D1D80B052CABBBC8 /* AthleteNutrition in Frameworks */ = {isa = PBXBuildFile; productRef = 27301A2025CD460E49D7B4B0 /* AthleteNutrition */; };
 		603F55226DB7422C69381DEF /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E55114F9CEDE340C6BD68CA /* CameraView.swift */; };
+		6111E9DE79D1BFAD4D6FB4C5 /* PersonalizationFeatureBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B0C52D1A3CE1CCCDBE2A430 /* PersonalizationFeatureBuilder.swift */; };
 		680C9E7216E051775620E86F /* BaselineApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC4E9AA70B1E388336CD0ED /* BaselineApp.swift */; };
 		89F4ECD03AD37EE47426CFC8 /* AthletePersonalization in Frameworks */ = {isa = PBXBuildFile; productRef = EC1E8B6B62284BC14AB578D9 /* AthletePersonalization */; };
 		BCE0B0A08B6A521F298EE7CA /* ChatModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93106080A48EEB56C6A64DAF /* ChatModel.swift */; };
@@ -42,6 +43,7 @@
 		1C8D73966F7D51C8A20A7A0C /* FoodFrameGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodFrameGate.swift; sourceTree = "<group>"; };
 		444EFEC840B90D25B3246576 /* AppShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShell.swift; sourceTree = "<group>"; };
 		4A7838FE09CC06FD091D9A4C /* SampleDashboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleDashboardTests.swift; sourceTree = "<group>"; };
+		5B0C52D1A3CE1CCCDBE2A430 /* PersonalizationFeatureBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalizationFeatureBuilder.swift; sourceTree = "<group>"; };
 		6E55114F9CEDE340C6BD68CA /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
 		8DC4E9AA70B1E388336CD0ED /* BaselineApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BaselineApp.swift; sourceTree = "<group>"; };
 		917EC6C734FA7FDEF274FFAD /* Baseline.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Baseline.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -83,6 +85,7 @@
 				1C8D73966F7D51C8A20A7A0C /* FoodFrameGate.swift */,
 				D4673FD913ED7A5BDFD61107 /* FoodObjectDetector.swift */,
 				16F83EDBAF598A7224A2DE0A /* LocalDeviceServices.swift */,
+				5B0C52D1A3CE1CCCDBE2A430 /* PersonalizationFeatureBuilder.swift */,
 				EDDE1E754BFB6A694897C66D /* StoreFactory.swift */,
 			);
 			path = Sources;
@@ -231,6 +234,7 @@
 				F6FCC4017B4FBE8D13F6B011 /* FoodFrameGate.swift in Sources */,
 				E773946CADE1D2DF941C294A /* FoodObjectDetector.swift in Sources */,
 				1B0C4DAB229B0739EAC9C927 /* LocalDeviceServices.swift in Sources */,
+				6111E9DE79D1BFAD4D6FB4C5 /* PersonalizationFeatureBuilder.swift in Sources */,
 				C654847562C8CBEEB8808918 /* StoreFactory.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

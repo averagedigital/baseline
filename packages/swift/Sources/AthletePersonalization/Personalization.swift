@@ -6,6 +6,12 @@ public struct PersonalizationFeatures: Codable, Equatable, Sendable {
     public let values: [Double]
     public let version: PersonalizationFeatureVersion
 
+    public init?(values: [Double], version: PersonalizationFeatureVersion = .v1) {
+        guard values.count == 8, values.allSatisfy(\.isFinite) else { return nil }
+        self.values = values
+        self.version = version
+    }
+
     public init(activeMinutes: Double, setCount: Double, trackingCoverage: Double, workRestRatio: Double, recentActiveMinutes: Double, hoursSincePrevious: Double, nutritionSignal: Double = 0) {
         values = [1, activeMinutes / 60, setCount / 20, min(workRestRatio / 4, 1), trackingCoverage, recentActiveMinutes / 300, min(hoursSincePrevious / 168, 1), nutritionSignal / 2000]
         version = .v1
@@ -16,10 +22,9 @@ public struct DifficultyRegressionState: Codable, Equatable, Sendable {
     public var inverseCovariance: [[Double]]
     public var weights: [Double]
     public var sampleCount: Int
-    public var targetSum: Double
     public init(dimension: Int = 8, regularization: Double = 1) {
         inverseCovariance = (0..<dimension).map { row in (0..<dimension).map { $0 == row ? 1 / regularization : 0 } }
-        weights = Array(repeating: 0, count: dimension); sampleCount = 0; targetSum = 0
+        weights = Array(repeating: 0, count: dimension); sampleCount = 0
     }
 }
 
@@ -27,7 +32,6 @@ public struct LocalDifficultyModel: Codable, Equatable, Sendable {
     public private(set) var state: DifficultyRegressionState
     public init() { state = DifficultyRegressionState() }
     public var samples: Int { state.sampleCount }
-    public var prediction: Double? { state.sampleCount >= 3 ? min(max(state.targetSum / Double(state.sampleCount), 1), 10) : nil }
     public var dataConfidence: Double { min(Double(state.sampleCount) / 20, 1) }
 
     public mutating func update(features: PersonalizationFeatures, rpe: Double) {
@@ -38,13 +42,12 @@ public struct LocalDifficultyModel: Codable, Equatable, Sendable {
         state.weights = zip(state.weights, gain).map { $0 + $1 * error }
         for row in state.inverseCovariance.indices { for col in state.inverseCovariance[row].indices { state.inverseCovariance[row][col] -= gain[row] * px[col] } }
         state.sampleCount += 1
-        state.targetSum += min(max(rpe, 1), 10)
     }
 
-    public func predict(features: PersonalizationFeatures?) -> Double? {
+    public func predict(features: PersonalizationFeatures) -> Double? {
         guard state.sampleCount >= 3 else { return nil }
-        let x = features?.values ?? [1, 0, 0, 0, 0, 0, 0, 0]
-        return min(max(dot(state.weights, x), 1), 10)
+        guard features.values.count == state.weights.count else { return nil }
+        return min(max(dot(state.weights, features.values), 1), 10)
     }
 }
 
@@ -82,6 +85,15 @@ public struct RecommendationExposure: Codable, Equatable, Sendable {
         rewardedAt = Date()
         reward = 1
         return true
+    }
+}
+
+public struct PersonalizationState: Codable, Equatable, Sendable {
+    public var difficulty: LocalDifficultyModel
+    public var bandit: LocalBanditState
+    public init(difficulty: LocalDifficultyModel = LocalDifficultyModel(), bandit: LocalBanditState = LocalBanditState()) {
+        self.difficulty = difficulty
+        self.bandit = bandit
     }
 }
 

@@ -53,6 +53,20 @@ public struct UserNarrative: Codable, Equatable, Sendable {
     }
 }
 
+public struct SessionRPEEvidence: Codable, Equatable, Sendable {
+    public let sessionEvidenceID: UUID
+    public let rpe: Double
+    public let note: String?
+    public init(sessionEvidenceID: UUID, rpe: Double, note: String?) {
+        self.sessionEvidenceID = sessionEvidenceID; self.rpe = min(max(rpe, 1), 10); self.note = note
+    }
+    public func envelope(id: UUID = UUID(), ingestedAt: Date = Date()) throws -> EvidenceEnvelope {
+        let payload = try JSONEncoder().encode(self)
+        let digest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
+        return EvidenceEnvelope(id: id, moduleID: "org.baseline.user-narrative", moduleVersion: "session-rpe-v1", kind: "user.narrative.v1", observedFrom: ingestedAt, observedTo: ingestedAt, ingestedAt: ingestedAt, epistemicRole: .userReported, provenance: Provenance(sourceID: "rpe-feedback", producerID: "session-rpe", producerVersion: "session-rpe-v1", method: "explicit-rpe-input"), privacyClass: .sensitiveLocal, payload: PayloadReference(mediaType: "application/json", schemaID: "session.rpe", schemaVersion: "1", storageURI: "baseline://evidence/\(id.uuidString)"), derivedFrom: [sessionEvidenceID], supersedes: nil, contentDigest: "sha256:\(digest)")
+    }
+}
+
 public enum UserNarrativeError: Error, Equatable, Sendable {
     case emptyText
 }

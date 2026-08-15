@@ -86,6 +86,7 @@ func feedbackDraftKeepsEvidenceIdentity() {
     )
 
     let feedback = PendingSessionFeedback(
+        feedbackEventID: UUID(),
         evidenceID: evidenceID,
         context: context,
         summary: summary

@@ -56,6 +56,7 @@ struct SessionSummaryViewData: Equatable, Sendable {
 
 struct PendingSessionFeedback: Identifiable, Equatable, Sendable {
     let id = UUID()
+    let feedbackEventID: UUID
     let evidenceID: UUID
     let context: PersonalizationContext
     let summary: SessionSummaryViewData
@@ -291,6 +292,7 @@ final class CameraModel {
                 recentFoodKcalMidpoint: latestFood.map { ($0.caloriesLow + $0.caloriesHigh) / 2 } ?? 0
             )
             pendingFeedback = PendingSessionFeedback(
+                feedbackEventID: UUID(),
                 evidenceID: envelope.id,
                 context: context,
                 summary: viewData
@@ -304,10 +306,10 @@ final class CameraModel {
     func submitRPE(_ value: Double, note: String, for feedback: PendingSessionFeedback) async -> Bool {
         do {
             _ = try await localServices.sendSessionRPE(
+                eventID: feedback.feedbackEventID,
                 value: value,
                 sourceEvidenceID: feedback.evidenceID,
-                note: note,
-                context: feedback.context
+                note: note
             )
             pendingFeedback = nil
             await refreshHome()
@@ -639,7 +641,7 @@ struct HomeInsightCard: View {
                 Text("Сейчас")
                     .font(.system(size: 17, weight: .semibold))
                 Spacer()
-                if let confidence = model.localHome?.predictionConfidence, confidence > 0 {
+                if let confidence = model.localHome?.recommendationConfidence, model.localHome?.recommendationIsPersonalized == true, confidence > 0 {
                     Text("персонализация \(Int((confidence * 100).rounded()))%")
                         .font(.caption)
                         .foregroundStyle(BaselineTheme.secondary)
