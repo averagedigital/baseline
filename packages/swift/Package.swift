@@ -7,7 +7,6 @@ let package = Package(
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [
         .library(name: "AthleteCore", targets: ["AthleteCore"]),
-        .library(name: "AthleteAgents", targets: ["AthleteAgents"]),
         .library(name: "AthleteSensors", targets: ["AthleteSensors"]),
         .library(name: "AthleteStore", targets: ["AthleteStore"]),
     ],
@@ -16,14 +15,12 @@ let package = Package(
     ],
     targets: [
         .target(name: "AthleteCore"),
-        .target(name: "AthleteAgents", dependencies: ["AthleteCore", "AthleteStore"]),
         .target(name: "AthleteSensors", dependencies: ["AthleteCore"]),
         .target(
             name: "AthleteStore",
             dependencies: ["AthleteCore", .product(name: "GRDB", package: "GRDB.swift")]
         ),
         .testTarget(name: "AthleteCoreTests", dependencies: ["AthleteCore"]),
-        .testTarget(name: "AthleteAgentsTests", dependencies: ["AthleteAgents", "AthleteCore", "AthleteStore"]),
         .testTarget(name: "AthleteSensorsTests", dependencies: ["AthleteSensors", "AthleteStore"]),
         .testTarget(
             name: "AthleteStoreTests",

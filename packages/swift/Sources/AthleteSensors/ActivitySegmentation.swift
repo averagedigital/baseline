@@ -10,6 +10,9 @@ public struct ActivitySegmentationConfiguration: Equatable, Sendable {
     public let minimumActiveDuration: TimeInterval
     public let minimumRestDuration: TimeInterval
     public let shortTrackingGapDuration: TimeInterval
+    public let enterConfirmationDuration: TimeInterval
+    public let exitConfirmationDuration: TimeInterval
+    public let boundingBoxCanEnterActivity: Bool
 
     public init(
         enterVelocity: Double,
@@ -20,7 +23,10 @@ public struct ActivitySegmentationConfiguration: Equatable, Sendable {
         exitBoundingBoxMotion: Double,
         minimumActiveDuration: TimeInterval,
         minimumRestDuration: TimeInterval,
-        shortTrackingGapDuration: TimeInterval
+        shortTrackingGapDuration: TimeInterval,
+        enterConfirmationDuration: TimeInterval = 0,
+        exitConfirmationDuration: TimeInterval = 0,
+        boundingBoxCanEnterActivity: Bool = true
     ) {
         self.enterVelocity = enterVelocity
         self.exitVelocity = exitVelocity
@@ -28,9 +34,12 @@ public struct ActivitySegmentationConfiguration: Equatable, Sendable {
         self.exitMovingFraction = exitMovingFraction
         self.enterBoundingBoxMotion = enterBoundingBoxMotion
         self.exitBoundingBoxMotion = exitBoundingBoxMotion
-        self.minimumActiveDuration = minimumActiveDuration
-        self.minimumRestDuration = minimumRestDuration
-        self.shortTrackingGapDuration = shortTrackingGapDuration
+        self.minimumActiveDuration = max(0, minimumActiveDuration)
+        self.minimumRestDuration = max(0, minimumRestDuration)
+        self.shortTrackingGapDuration = max(0, shortTrackingGapDuration)
+        self.enterConfirmationDuration = max(0, enterConfirmationDuration)
+        self.exitConfirmationDuration = max(0, exitConfirmationDuration)
+        self.boundingBoxCanEnterActivity = boundingBoxCanEnterActivity
     }
 }
 
@@ -100,27 +109,62 @@ public struct ActivitySegmenter: Sendable {
         for (index, window) in windows.enumerated() where window.duration < 0 {
             throw ActivitySegmentationError.invalidDuration(index: index)
         }
-
+        let source = windows.filter { $0.duration > 0 }
+        var states = Array(repeating: ActivitySegmentState.rest, count: source.count)
         var motionState = ActivitySegmentState.rest
-        var offset: TimeInterval = 0
-        var segments: [ActivitySegment] = []
+        var pendingIndices: [Int] = []
+        var pendingDuration: TimeInterval = 0
 
-        for window in windows where window.duration > 0 {
-            let state: ActivitySegmentState
-            if !window.trackingAvailable {
-                state = .trackingGap
-            } else {
-                switch motionState {
-                case .rest, .trackingGap:
-                    if entersActive(window) { motionState = .active }
-                case .active:
-                    if exitsActive(window) { motionState = .rest }
-                }
-                state = motionState
+        for (index, window) in source.enumerated() {
+            guard window.trackingAvailable else {
+                states[index] = .trackingGap
+                pendingIndices.removeAll(keepingCapacity: true)
+                pendingDuration = 0
+                continue
             }
-            append(state: state, duration: window.duration, offset: &offset, to: &segments)
+
+            switch motionState {
+            case .rest, .trackingGap:
+                if entersActive(window) {
+                    pendingIndices.append(index)
+                    pendingDuration += window.duration
+                    states[index] = .rest
+                    if pendingDuration >= configuration.enterConfirmationDuration {
+                        for pendingIndex in pendingIndices { states[pendingIndex] = .active }
+                        pendingIndices.removeAll(keepingCapacity: true)
+                        pendingDuration = 0
+                        motionState = .active
+                    }
+                } else {
+                    pendingIndices.removeAll(keepingCapacity: true)
+                    pendingDuration = 0
+                    states[index] = .rest
+                    motionState = .rest
+                }
+            case .active:
+                if exitsActive(window) {
+                    pendingIndices.append(index)
+                    pendingDuration += window.duration
+                    states[index] = .active
+                    if pendingDuration >= configuration.exitConfirmationDuration {
+                        for pendingIndex in pendingIndices { states[pendingIndex] = .rest }
+                        pendingIndices.removeAll(keepingCapacity: true)
+                        pendingDuration = 0
+                        motionState = .rest
+                    }
+                } else {
+                    pendingIndices.removeAll(keepingCapacity: true)
+                    pendingDuration = 0
+                    states[index] = .active
+                }
+            }
         }
 
+        var offset: TimeInterval = 0
+        var segments: [ActivitySegment] = []
+        for (window, state) in zip(source, states) {
+            append(state: state, duration: window.duration, offset: &offset, to: &segments)
+        }
         segments = normalize(segments)
         let activeTime = duration(of: .active, in: segments)
         let restTime = duration(of: .rest, in: segments)
@@ -138,9 +182,11 @@ public struct ActivitySegmenter: Sendable {
     }
 
     private func entersActive(_ window: ActivityWindow) -> Bool {
-        window.normalizedJointVelocity >= configuration.enterVelocity
+        let articulation = window.normalizedJointVelocity >= configuration.enterVelocity
             || window.movingJointFraction >= configuration.enterMovingFraction
-            || window.boundingBoxMotion >= configuration.enterBoundingBoxMotion
+        let boxTrigger = configuration.boundingBoxCanEnterActivity
+            && window.boundingBoxMotion >= configuration.enterBoundingBoxMotion
+        return articulation || boxTrigger
     }
 
     private func exitsActive(_ window: ActivityWindow) -> Bool {

@@ -4,3 +4,9 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 apps/ios/Baseline/Config/Signing.local.xcconfig
+apps/backend/.env
+apps/backend/.venv/
+apps/backend/.pytest_cache/
+apps/backend/**/__pycache__/
+apps/backend/*.db
+*.pyc

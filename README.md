@@ -1,46 +1,22 @@
 # Baseline
 
-iOS-приложение для сбора тренировочной телеметрии, хранения данных и персонализации ответов ЛЛМ
+Baseline is an evidence-first iOS training companion with a lightweight realtime client and a heavier analytical backend.
 
-## Стек
+## Repository layout
 
-- Swift 6;
-- SwiftUI;
-- iOS 17+;
-- Swift Package Manager;
-- GRDB 7.11.1;
-- SQLite и FTS5;
-- Swift Testing;
-- Xcode 26;
-- XcodeGen.
+- `apps/ios/Baseline` — camera, multi-person-safe subject lock, robust motion metrics, local evidence, compact white UI, food gate.
+- `apps/backend` — FastAPI, PostgreSQL, Alembic, food/nutrition analysis, Coach context, grounding, personalization.
+- `packages/swift` — shared domain, sensors, and local GRDB storage.
+- `docs/BASELINE_V2_ARCHITECTURE.md` — data flow, quality rules, privacy, API, and verification.
 
-## Модули
+## Core invariants
 
-- `AthleteCore` — evidence, provenance, memory, module и plan contracts;
-- `AthleteStore` — GRDB migrations, evidence ledger, memory dependencies и FTS5;
-- `AthleteAgents` — context compiler, grounding verifier, State Builder, Coach и plan approval;
-- `Baseline` — iOS-приложение и визуальный слой.
+- Never choose a person by Vision result order.
+- Never write ambiguous tracking frames into movement metrics.
+- Never store raw video or food image bytes.
+- Never expose provider API keys in the iOS bundle.
+- Never present a single-image food estimate as exact calories.
+- Never train personalization without explicit RPE or useful/not-useful feedback.
+- Never give Coach exact user-specific numbers without evidence references.
 
-## Структура
-
-```text
-apps/ios/Baseline/     iOS target и Xcode project
-packages/swift/        Swift packages и тесты
-```
-
-## Тесты
-
-```bash
-cd packages/swift
-swift test
-```
-
-```bash
-cd apps/ios/Baseline
-xcodebuild \
-  -project Baseline.xcodeproj \
-  -scheme Baseline \
-  -sdk iphonesimulator \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
-  test CODE_SIGNING_ALLOWED=NO
-```
+## Verification
