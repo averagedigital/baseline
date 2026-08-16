@@ -75,6 +75,8 @@ final class CameraModel {
     var cameraPosition: CaptureCameraPosition = .front
     var foodScanEnabled = true
     var foodPhase: FoodScanPhase = .watching
+    var foodDetectorAvailability: FoodObjectDetector.Availability = .modelMissing
+    var nutritionAvailability: NutritionAvailability = .databaseMissing
     var foodObjects: [TrackedFoodObject] = []
     var foodSourceSize: CGSize = .zero
     var latestFood: LocalFoodAnalysis?
@@ -137,6 +139,7 @@ final class CameraModel {
         pipeline.onFoodAvailability = { [weak self] availability in
             Task { @MainActor in
                 guard let self else { return }
+                self.foodDetectorAvailability = availability
                 if availability != .available { self.foodPhase = .unavailable }
             }
         }
@@ -144,6 +147,10 @@ final class CameraModel {
             Task { @MainActor in
                 self?.errorMessage = message
             }
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.nutritionAvailability = await self.localServices.nutritionAvailability()
         }
     }
 
@@ -508,7 +515,8 @@ struct CameraCard: View {
                 }
                 .padding(12)
             }
-            .frame(height: 360)
+            .aspectRatio(4 / 3, contentMode: .fit)
+            .frame(maxHeight: 380)
             .background(Color.black)
             .clipShape(UnevenRoundedRectangle(
                 topLeadingRadius: 20,
@@ -631,7 +639,9 @@ struct LatestFoodCard: View {
                 Text(model.latestFoodTitle)
                     .font(.system(size: 15, weight: .medium))
                 if !model.foodObjects.isEmpty {
-                    Text("Продукт распознан. Для калорий нужно уточнить размер порции.")
+                    Text(model.nutritionAvailability == .available
+                        ? "Для калорий нужно уточнить размер порции."
+                        : "База питания не подключена.")
                         .font(.caption)
                         .foregroundStyle(BaselineTheme.secondary)
                 }
@@ -695,6 +705,16 @@ struct HomeInsightCard: View {
         default: "Собрать первую надёжную базовую линию"
         }
     }
+}
+
+#Preview("Camera idle") {
+    CameraCard(model: CameraModel(store: nil, localServices: LocalDeviceServices(store: nil)))
+        .padding()
+}
+
+#Preview("Food idle") {
+    LatestFoodCard(model: CameraModel(store: nil, localServices: LocalDeviceServices(store: nil)))
+        .padding()
 }
 
 private struct TrackingStatusPill: View {

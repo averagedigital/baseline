@@ -61,7 +61,7 @@ struct AppShell: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Baseline")
                     .font(.system(size: 29, weight: .bold, design: .rounded))
-                Text("Тренировка, питание и персональный контекст")
+                Text("Тренировка, движение и питание")
                     .font(.caption)
                     .foregroundStyle(BaselineTheme.secondary)
             }

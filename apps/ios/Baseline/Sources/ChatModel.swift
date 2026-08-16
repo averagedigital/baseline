@@ -47,6 +47,26 @@ final class ChatModel {
         self.localServices = localServices
     }
 
+    func loadMostRecentThread() async {
+        guard messages.isEmpty else { return }
+        do {
+            guard let (thread, history) = try await localServices.mostRecentChat() else { return }
+            threadID = thread.id
+            messages = history.map { item in
+                CoachMessage(id: item.id, role: item.role == .user ? .user : .assistant, text: item.text)
+            }
+        } catch {
+            errorMessage = "Не удалось загрузить историю Coach."
+        }
+    }
+
+    func startNewThread() {
+        threadID = nil
+        messages.removeAll()
+        draft = ""
+        errorMessage = nil
+    }
+
     func send(_ value: String? = nil) async {
         let text = (value ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
@@ -118,7 +138,7 @@ struct CoachScreen: View {
                             HStack(spacing: 9) {
                                 ProgressView()
                                     .controlSize(.small)
-                                Text("Собираю контекст и проверяю ссылки на данные")
+                                Text("Анализирую данные тренировки…")
                                     .font(.subheadline)
                                     .foregroundStyle(BaselineTheme.secondary)
                             }
@@ -148,13 +168,18 @@ struct CoachScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Готово") { dismiss() }
+                    Menu {
+                        Button("Новый диалог", systemImage: "plus") { model.startNewThread() }
+                        Button("Готово") { dismiss() }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
                 }
             }
             .safeAreaInset(edge: .bottom) { composer }
             .task {
-                guard let initialPrompt, model.messages.isEmpty else { return }
-                await model.send(initialPrompt)
+                await model.loadMostRecentThread()
+                if let initialPrompt, model.messages.isEmpty { await model.send(initialPrompt) }
             }
             .alert("Ошибка", isPresented: errorBinding) {
                 Button("Закрыть") { model.errorMessage = nil }
@@ -215,18 +240,11 @@ struct CoachScreen: View {
                 .textSelection(.enabled)
         } else {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 10) {
-                    Text("B")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 28, height: 28)
-                        .background(BaselineTheme.ink, in: Circle())
-                    Text(message.text)
-                        .font(.body)
-                        .lineSpacing(4)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                Text(message.text)
+                    .font(.body)
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if message.recommendationCategory != nil,
                    message.recommendationCategory != "none" {
                     HStack(spacing: 10) {
@@ -236,7 +254,7 @@ struct CoachScreen: View {
                         ratingButton(systemName: "hand.thumbsup", value: 1, message: message)
                         ratingButton(systemName: "hand.thumbsdown", value: -1, message: message)
                     }
-                    .padding(.leading, 38)
+                    .padding(.leading, 0)
                 }
             }
         }
@@ -286,4 +304,8 @@ struct CoachScreen: View {
         .padding(.bottom, 8)
         .background(BaselineTheme.canvas)
     }
+}
+
+#Preview("Coach empty") {
+    CoachScreen(localServices: LocalDeviceServices(store: nil))
 }

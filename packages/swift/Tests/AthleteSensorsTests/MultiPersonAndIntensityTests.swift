@@ -10,7 +10,8 @@ private func candidate(
     width: Double = 0.26,
     height: Double = 0.62,
     confidence: Double = 0.9,
-    poseOffset: Double = 0
+    poseOffset: Double = 0,
+    appearance: AppearanceSignature? = nil
 ) -> PoseCandidate {
     let rect = NormalizedPoseRect(
         x: centerX - width / 2,
@@ -30,7 +31,7 @@ private func candidate(
             )
         )
     }
-    return PoseCandidate(samples: samples, boundingBox: rect, averageConfidence: confidence)
+    return PoseCandidate(samples: samples, boundingBox: rect, averageConfidence: confidence, appearanceSignature: appearance)
 }
 
 final class AthleteSensorsTests: XCTestCase {
@@ -68,6 +69,37 @@ func testRejectsAmbiguousCrossing() {
     XCTAssertTrue(!ambiguous.isMetricEligible)
     XCTAssertEqual(ambiguous.trackingState, .multiplePeople)
     XCTAssertEqual(ambiguous.exclusionReason, .ambiguousSubjects)
+}
+
+func testCloseAppearanceKeepsSameTrack() {
+    var tracker = PrimarySubjectTracker(configuration: .init(acquisitionFrames: 2))
+    let first = candidate(centerX: 0.5, appearance: AppearanceSignature(values: [0.1, 0.2, 0.3]))
+    _ = tracker.update(candidates: [first])
+    let acquired = tracker.update(candidates: [candidate(centerX: 0.5, appearance: AppearanceSignature(values: [0.11, 0.2, 0.3]))])
+    XCTAssertNotNil(acquired.trackID)
+    let next = tracker.update(candidates: [candidate(centerX: 0.5, appearance: AppearanceSignature(values: [0.12, 0.2, 0.3]))])
+    XCTAssertEqual(next.trackID, acquired.trackID)
+    XCTAssertNotEqual(next.exclusionReason, .identityDiscontinuity)
+}
+
+func testFarAppearanceRejectsIdentity() {
+    var tracker = PrimarySubjectTracker(configuration: .init(acquisitionFrames: 2))
+    let first = candidate(centerX: 0.5, appearance: AppearanceSignature(values: [0, 0, 0]))
+    _ = tracker.update(candidates: [first])
+    let acquired = tracker.update(candidates: [candidate(centerX: 0.5, appearance: AppearanceSignature(values: [0, 0, 0]))])
+    XCTAssertNotNil(acquired.trackID)
+    let next = tracker.update(candidates: [candidate(centerX: 0.5, appearance: AppearanceSignature(values: [1, 1, 1]))])
+    XCTAssertEqual(next.exclusionReason, .identityDiscontinuity)
+    XCTAssertFalse(next.isMetricEligible)
+}
+
+func testMissingAppearanceUsesGeometryFallback() {
+    var tracker = PrimarySubjectTracker(configuration: .init(acquisitionFrames: 2))
+    _ = tracker.update(candidates: [candidate(centerX: 0.5, appearance: AppearanceSignature(values: [0, 0, 0]))])
+    let acquired = tracker.update(candidates: [candidate(centerX: 0.5)])
+    XCTAssertNotNil(acquired.trackID)
+    let next = tracker.update(candidates: [candidate(centerX: 0.51)])
+    XCTAssertEqual(next.trackID, acquired.trackID)
 }
 
 func testDoesNotColdSwitchToDistantPerson() {

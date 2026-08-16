@@ -15,8 +15,9 @@ targets:
       Release: Config/Signing.xcconfig
     sources:
       - path: Sources
-    resources:
       - path: Resources
+        optional: true
+        buildPhase: resources
     dependencies:
       - package: BaselinePackages
         product: AthleteCore

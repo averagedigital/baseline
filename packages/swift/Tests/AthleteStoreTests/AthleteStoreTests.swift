@@ -1,4 +1,5 @@
 import AthleteCore
+import AthleteSensors
 import AthleteStore
 import Foundation
 import GRDB
@@ -87,6 +88,105 @@ func deletesChatHistory() async throws {
 
     #expect(try await store.chatThreads().isEmpty)
     #expect(try await store.chatMessages(threadID: thread.id).isEmpty)
+}
+
+@Test("File-backed store восстанавливает state, exposure, food и chat после restart")
+func fileBackedRestartRestoresLocalState() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let path = directory.appendingPathComponent("db.sqlite").path
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let threadID: UUID
+    let exposureID = UUID()
+    let foodID = UUID()
+    do {
+        let store = try AthleteStore(path: path)
+        let thread = try await store.createChat(title: "Restart")
+        threadID = thread.id
+        try await store.appendChatMessage(ChatHistoryMessage(threadID: thread.id, role: .user, text: "Сохранись"))
+        try await store.savePersonalizationState("state-v1", at: Date(timeIntervalSince1970: 10))
+        try await store.saveRecommendationExposure(StoredRecommendationExposure(id: exposureID, payload: Data("exposure".utf8), createdAt: Date(timeIntervalSince1970: 11)))
+        try await store.saveFoodObservation(StoredFoodObservation(id: foodID, payload: Data("food".utf8), capturedAt: Date(timeIntervalSince1970: 12)))
+    }
+
+    let store = try AthleteStore(path: path)
+    #expect(try await store.loadPersonalizationState(as: String.self) == "state-v1")
+    #expect(try await store.recommendationExposure(id: exposureID)?.payload == Data("exposure".utf8))
+    #expect(try await store.recentFoodObservations(limit: 1).first?.id == foodID)
+    #expect(try await store.chatMessages(threadID: threadID).map(\.text) == ["Сохранись"])
+}
+
+@Test("RPE idempotency keeps one feedback event and one session-derived evidence")
+func sessionRPEIsIdempotent() async throws {
+    let store = try AthleteStore.inMemory()
+    let sessionID = UUID()
+    let session = makeEvidence(id: sessionID)
+    try await store.appendEvidence(session)
+    let eventID = UUID()
+    let rpe = SessionRPEEvidence(sessionEvidenceID: sessionID, rpe: 8, note: "Тяжело")
+    let narrativeID = UUID()
+    let narrativeEnvelope = try rpe.envelope(id: narrativeID, ingestedAt: Date(timeIntervalSince1970: 10))
+    let payload = try JSONEncoder().encode(rpe)
+
+    let first = try await store.applySessionRPE(
+        eventID: eventID,
+        sourceEvidenceID: sessionID,
+        feedbackPayload: payload,
+        createdAt: Date(timeIntervalSince1970: 10),
+        statePayload: Data("state-1".utf8),
+        narrativeEnvelope: narrativeEnvelope,
+        narrativePayload: payload
+    )
+    let second = try await store.applySessionRPE(
+        eventID: eventID,
+        sourceEvidenceID: sessionID,
+        feedbackPayload: payload,
+        createdAt: Date(timeIntervalSince1970: 11),
+        statePayload: Data("state-2".utf8),
+        narrativeEnvelope: narrativeEnvelope,
+        narrativePayload: payload
+    )
+
+    #expect(first)
+    #expect(!second)
+    #expect(try await store.hasFeedbackEvent(id: eventID))
+    #expect(try await store.evidence(id: narrativeID)?.derivedFrom == [sessionID])
+    #expect(try await store.payload(for: narrativeID, as: SessionRPEEvidence.self) == rpe)
+}
+
+@Test("Reward snapshot is idempotent and preserves the first reward")
+func recommendationRewardIsIdempotent() async throws {
+    let store = try AthleteStore.inMemory()
+    let exposureID = UUID()
+    try await store.saveRecommendationExposure(
+        StoredRecommendationExposure(id: exposureID, payload: Data("feature-vector-A".utf8), createdAt: Date(timeIntervalSince1970: 10))
+    )
+    let firstEventID = UUID()
+    let secondEventID = UUID()
+
+    let first = try await store.applyRecommendationReward(
+        exposureID: exposureID,
+        reward: 1,
+        feedbackEventID: firstEventID,
+        feedbackPayload: Data("reward-1".utf8),
+        createdAt: Date(timeIntervalSince1970: 11),
+        statePayload: Data("bandit-from-A".utf8)
+    )
+    let second = try await store.applyRecommendationReward(
+        exposureID: exposureID,
+        reward: -1,
+        feedbackEventID: secondEventID,
+        feedbackPayload: Data("reward-2".utf8),
+        createdAt: Date(timeIntervalSince1970: 12),
+        statePayload: Data("bandit-from-other".utf8)
+    )
+
+    #expect(first)
+    #expect(!second)
+    #expect(try await store.recommendationExposure(id: exposureID)?.reward == 1)
+    #expect(try await store.hasFeedbackEvent(id: firstEventID))
+    #expect(!(try await store.hasFeedbackEvent(id: secondEventID)))
 }
 
 private func makeEvidence(id: UUID) -> EvidenceEnvelope {

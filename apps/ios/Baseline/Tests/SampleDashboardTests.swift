@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import AthleteNutrition
+import AthleteSensors
 @testable import Baseline
 
 @Test("История интенсивности ограничена временем, а не числом кадров")
@@ -32,6 +33,31 @@ func convertsFoodAspectFillGeometry() {
     #expect(rect.minX + mirrored.maxX == 16)
 }
 
+@Test("BBox geometry flips Vision Y and supports portrait aspect-fill")
+func convertsVisionYAndPortraitAspectFill() {
+    let bottom = AspectFillGeometry.displayRect(normalizedVisionRect: NormalizedFoodRect(x: 0, y: 0, width: 0.25, height: 0.25), sourceSize: CGSize(width: 16, height: 9), previewSize: CGSize(width: 9, height: 16), mirrored: false)
+    let top = AspectFillGeometry.displayRect(normalizedVisionRect: NormalizedFoodRect(x: 0, y: 0.75, width: 0.25, height: 0.25), sourceSize: CGSize(width: 16, height: 9), previewSize: CGSize(width: 9, height: 16), mirrored: false)
+    #expect(bottom.minY > top.minY)
+    #expect(bottom.width > 0)
+    #expect(bottom.height > 0)
+}
+
+@Test("Front preview mirrors bbox while back preview does not")
+func mirrorsOnlyFrontCameraBBox() {
+    let source = NormalizedFoodRect(x: 0.1, y: 0.2, width: 0.2, height: 0.2)
+    let back = AspectFillGeometry.displayRect(normalizedVisionRect: source, sourceSize: CGSize(width: 4, height: 3), previewSize: CGSize(width: 16, height: 9), mirrored: false)
+    let front = AspectFillGeometry.displayRect(normalizedVisionRect: source, sourceSize: CGSize(width: 4, height: 3), previewSize: CGSize(width: 16, height: 9), mirrored: true)
+    #expect(back.minX != front.minX)
+    #expect(abs(back.minX + front.maxX - 16) < 0.001)
+}
+
+@Test("Zero source or preview size yields no bbox")
+func rejectsZeroGeometrySize() {
+    let rect = NormalizedFoodRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2)
+    #expect(AspectFillGeometry.displayRect(normalizedVisionRect: rect, sourceSize: .zero, previewSize: CGSize(width: 100, height: 100), mirrored: false) == .zero)
+    #expect(AspectFillGeometry.displayRect(normalizedVisionRect: rect, sourceSize: CGSize(width: 100, height: 100), previewSize: .zero, mirrored: false) == .zero)
+}
+
 @Test("Локальный gate не запускает классификацию чаще заданного интервала")
 func throttlesFoodClassification() {
     var gate = FoodFrameGate(evaluationInterval: 1.5)
@@ -55,6 +81,24 @@ func requiresConsecutiveFoodSignals() {
     #expect(!first)
     #expect(second)
     #expect(!third)
+}
+
+@Test("Food gate resets after a miss and respects upload cooldown")
+func resetsFoodSignalsAndCooldown() {
+    var gate = FoodFrameGate(evaluationInterval: 0.1, uploadCooldown: 20, requiredPositiveFrames: 2)
+    let food = [FoodDetection(label: "apple", confidence: 0.8, boundingBox: NormalizedFoodRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2))]
+    let first = gate.consume(observations: food, at: 0)
+    let miss = gate.consume(observations: [], at: 1)
+    let third = gate.consume(observations: food, at: 2)
+    let upload = gate.consume(observations: food, at: 3)
+    let cooldownOne = gate.consume(observations: food, at: 4)
+    let cooldownTwo = gate.consume(observations: food, at: 5)
+    #expect(!first)
+    #expect(!miss)
+    #expect(!third)
+    #expect(upload)
+    #expect(!cooldownOne)
+    #expect(!cooldownTwo)
 }
 
 @Test("Ответ питания декодируется как диапазон, а не одно точное число")
@@ -107,4 +151,32 @@ func decodesRecommendationFeedbackContext() throws {
 
     #expect(value.recommendationCategory == "recovery")
     #expect(value.feedbackContextID == UUID(uuidString: "00000000-0000-0000-0000-000000000002"))
+}
+
+@Test("Capture quality не считает warmup rejected motion")
+func captureQualityWarmupIsNotMotionRejection() {
+    var accumulator = WorkoutCaptureQualityAccumulator()
+    accumulator.record(
+        frame: PoseFrame(samples: [], trackingState: .stable, isMetricEligible: false, exclusionReason: .none),
+        metrics: .invalid(.warmup)
+    )
+    #expect(accumulator.warmupFrameCount == 1)
+    #expect(accumulator.rejectedMotionFrameCount == 0)
+}
+
+@Test("Capture quality отдельно считает ambiguity и identity discontinuity")
+func captureQualityIdentityCategories() {
+    var accumulator = WorkoutCaptureQualityAccumulator()
+    accumulator.record(frame: PoseFrame(samples: [], trackID: UUID(), trackingState: .multiplePeople, exclusionReason: .ambiguousSubjects), metrics: .invalid(.ambiguousSubjects))
+    accumulator.record(frame: PoseFrame(samples: [], trackID: UUID(), trackingState: .lost, exclusionReason: .identityDiscontinuity), metrics: .invalid(.identityDiscontinuity))
+    #expect(accumulator.ambiguousFrameCount == 1)
+    #expect(accumulator.identityDiscontinuityCount == 1)
+    #expect(accumulator.rejectedMotionFrameCount == 0)
+}
+
+@Test("Capture quality считает low confidence tracked frame rejected motion")
+func captureQualityRejectedMotion() {
+    var accumulator = WorkoutCaptureQualityAccumulator()
+    accumulator.record(frame: PoseFrame(samples: [], trackID: UUID(), trackingState: .degraded, exclusionReason: .none), metrics: .invalid(.lowConfidence))
+    #expect(accumulator.rejectedMotionFrameCount == 1)
 }
