@@ -3,22 +3,21 @@ import SwiftUI
 struct AppShell: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var model = CameraModel()
+    @State private var selectedTab = AppTab.camera
 
     var body: some View {
         @Bindable var bindableModel = model
 
-        TabView {
+        TabView(selection: $selectedTab) {
             NavigationStack {
-                CameraCard(model: model)
-                    .padding(16)
-                    .baselinePage()
-                    .navigationTitle("Камера")
-                    .navigationBarTitleDisplayMode(.inline)
+                CameraScreen(model: model)
             }
+            .tag(AppTab.camera)
             .tabItem { Label("Камера", systemImage: "camera.fill") }
 
             CoachScreen(localServices: model.localServices)
-                .tabItem { Label("Coach", systemImage: "sparkles") }
+                .tag(AppTab.chat)
+                .tabItem { Label("Чат", systemImage: "bubble.left.and.bubble.right.fill") }
         }
         .tint(BaselineTheme.accent)
         .task {
@@ -60,6 +59,119 @@ struct AppShell: View {
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
         )
+    }
+}
+
+private enum AppTab: Hashable {
+    case camera
+    case chat
+}
+
+private struct CameraScreen: View {
+    let model: CameraModel
+
+    var body: some View {
+        ZStack {
+            CameraPreview(
+                session: model.pipeline.session,
+                isMirrored: model.cameraPosition == .front
+            )
+            .ignoresSafeArea()
+            PoseOverlay(
+                samples: model.samples,
+                boundingBox: model.boundingBox,
+                state: model.trackingState
+            )
+            .ignoresSafeArea()
+            FoodDetectionOverlay(
+                objects: model.foodObjects,
+                sourceSize: model.foodSourceSize,
+                isMirrored: model.cameraPosition == .front
+            )
+            .ignoresSafeArea()
+
+            VStack {
+                HStack {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(BaselineTheme.success)
+                            .frame(width: 6, height: 6)
+                        Text(model.cameraPosition == .front ? "ФРОНТАЛЬНАЯ" : "ОСНОВНАЯ")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .tracking(1.2)
+                    }
+                    Spacer()
+                    Button {
+                        Task { await model.switchCamera() }
+                    } label: {
+                        Image(systemName: "camera.rotate.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 42, height: 42)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .foregroundStyle(.white)
+                    .accessibilityLabel("Переключить камеру")
+                }
+                .foregroundStyle(.white)
+
+                Spacer()
+
+                if let errorMessage = model.errorMessage {
+                    Text(errorMessage)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .multilineTextAlignment(.center)
+                        .padding(14)
+                        .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 14))
+                        .foregroundStyle(.white)
+                } else {
+                    Text(statusLabel)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .tracking(1)
+                        .foregroundStyle(statusColor)
+                        .shadow(color: .black.opacity(0.9), radius: 3, y: 1)
+                        .padding(.bottom, 2)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 7) {
+                        Circle()
+                            .fill(BaselineTheme.accent)
+                            .frame(width: 5, height: 5)
+                            .shadow(color: BaselineTheme.accent.opacity(0.85), radius: 4)
+                        Text("ИНТЕНСИВНОСТЬ")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .tracking(1)
+                            .foregroundStyle(.white.opacity(0.78))
+                    }
+                    MotionIntensityChart(history: model.intensityHistory)
+                        .frame(height: 74)
+                }
+                .shadow(color: .black.opacity(0.55), radius: 4, y: 1)
+                .padding(.top, 12)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+        }
+        .background(Color.black)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var statusLabel: String {
+        switch model.trackingState {
+        case .stable: "TRACKING СТАБИЛЕН"
+        case .degraded: "TRACKING НЕПОЛНЫЙ"
+        case .acquiring: "ПОИСК СПОРТСМЕНА"
+        case .lost: "ТЕЛО НЕ НАЙДЕНО"
+        case .multiplePeople: "В КАДРЕ НЕСКОЛЬКО ЛЮДЕЙ"
+        }
+    }
+
+    private var statusColor: Color {
+        switch model.trackingState {
+        case .stable, .degraded, .acquiring, .multiplePeople: BaselineTheme.success
+        case .lost: .clear
+        }
     }
 }
 

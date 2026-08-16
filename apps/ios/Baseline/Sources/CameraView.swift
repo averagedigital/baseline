@@ -751,7 +751,7 @@ private struct TrackingStatusPill: View {
     }
 }
 
-private struct MotionIntensityChart: View {
+struct MotionIntensityChart: View {
     let history: MotionIntensityHistory
 
     var body: some View {
@@ -782,7 +782,7 @@ private struct MotionIntensityChart: View {
     }
 }
 
-private struct CameraPreview: UIViewRepresentable {
+struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
     let isMirrored: Bool
 
@@ -805,12 +805,12 @@ private struct CameraPreview: UIViewRepresentable {
     }
 }
 
-private final class PreviewView: UIView {
+final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
     var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
 }
 
-private struct PoseOverlay: View {
+struct PoseOverlay: View {
     let samples: [PoseSample]
     let boundingBox: NormalizedPoseRect?
     let state: PoseTrackingState

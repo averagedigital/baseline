@@ -132,6 +132,76 @@ actor LocalDeviceServices {
         return (thread, try await store.chatMessages(threadID: thread.id))
     }
 
+    func chatThreads() async throws -> [ChatThread] {
+        guard let store else { throw LocalStorageError.unavailable }
+        return try await store.chatThreads()
+    }
+
+    func chatMessages(threadID: UUID) async throws -> [ChatHistoryMessage] {
+        guard let store else { throw LocalStorageError.unavailable }
+        return try await store.chatMessages(threadID: threadID)
+    }
+
+    func createChat(title: String) async throws -> ChatThread {
+        guard let store else { throw LocalStorageError.unavailable }
+        return try await store.createChat(title: title)
+    }
+
+    func appendChatMessage(_ message: ChatHistoryMessage) async throws {
+        guard let store else { throw LocalStorageError.unavailable }
+        try await store.appendChatMessage(message)
+    }
+
+    func deleteChat(id: UUID) async throws {
+        guard let store else { throw LocalStorageError.unavailable }
+        try await store.deleteChat(id: id)
+    }
+
+    func providerConfigurations() async throws -> [ProviderConfiguration] {
+        guard let store else { throw LocalStorageError.unavailable }
+        return try await store.providerConfigurations()
+    }
+
+    func saveProviderConfiguration(_ configuration: ProviderConfiguration) async throws {
+        guard let store else { throw LocalStorageError.unavailable }
+        try await store.saveProviderConfiguration(configuration)
+    }
+
+    func selectProvider(id: UUID) async throws {
+        guard let store else { throw LocalStorageError.unavailable }
+        try await store.selectProvider(id: id)
+    }
+
+    func deleteProviderConfiguration(id: UUID) async throws {
+        guard let store else { throw LocalStorageError.unavailable }
+        try await store.deleteProviderConfiguration(id: id)
+    }
+
+    func cloudCoachContext(threadID: UUID?, message: String) async throws -> String {
+        guard let store else { throw LocalStorageError.unavailable }
+        let facts = try await coachFacts(store: store)
+        let history: [ChatHistoryMessage]
+        if let threadID {
+            history = try await store.chatMessages(threadID: threadID)
+        } else {
+            history = []
+        }
+        let recent = history.suffix(12).map { item in
+            "\(item.role.rawValue): \(item.text)"
+        }.joined(separator: "\n")
+        let renderedFacts = facts.map { "\($0.id) = \($0.displayValue)" }.joined(separator: "\n")
+        return """
+        CURRENT GROUNDED FACTS
+        \(renderedFacts)
+
+        RECENT CONVERSATION (maximum 12 messages)
+        \(recent.isEmpty ? "none" : recent)
+
+        CURRENT USER REQUEST
+        \(message)
+        """
+    }
+
     func analyzeFood(detections: [FoodDetection], capturedAt: Date) async throws -> LocalFoodAnalysis {
         ensureNutritionDatabase()
         let items = detections.compactMap { detection -> LocalFoodItem? in

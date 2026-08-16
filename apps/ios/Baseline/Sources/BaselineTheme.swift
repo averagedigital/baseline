@@ -16,6 +16,12 @@ enum BaselineTheme {
     static let danger = Color(red: 199 / 255, green: 61 / 255, blue: 77 / 255)
     static let dangerSoft = Color(red: 255 / 255, green: 238 / 255, blue: 241 / 255)
 
+    // Names retained for the reference chat/settings surface.
+    static let shell = canvas
+    static let raised = accentSoft
+    static let panel = surface
+    static let line = border
+
     static let compactAnimation = Animation.easeOut(duration: 0.20)
     static let standardAnimation = Animation.easeOut(duration: 0.24)
 }
