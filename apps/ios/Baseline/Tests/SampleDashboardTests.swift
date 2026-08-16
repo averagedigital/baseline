@@ -76,15 +76,6 @@ func decodesFoodRange() throws {
 @Test("RPE feedback сохраняет ссылку на конкретную session evidence")
 func feedbackDraftKeepsEvidenceIdentity() {
     let evidenceID = UUID()
-    let context = PersonalizationContext(
-        activeMinutes: 30,
-        setCount: 8,
-        workRestRatio: 1.5,
-        trackingCoverage: 0.9,
-        sevenDayActiveMinutes: 90,
-        hoursSincePreviousSession: 48,
-        recentFoodKcalMidpoint: 500
-    )
     let summary = SessionSummaryViewData(
         evidenceID: evidenceID,
         endedAt: Date(timeIntervalSince1970: 1_800_000_000),
@@ -97,7 +88,6 @@ func feedbackDraftKeepsEvidenceIdentity() {
     let feedback = PendingSessionFeedback(
         feedbackEventID: UUID(),
         evidenceID: evidenceID,
-        context: context,
         summary: summary
     )
 

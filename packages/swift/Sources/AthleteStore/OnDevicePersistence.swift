@@ -101,6 +101,15 @@ extension AthleteStore {
         }
     }
 
+    public func recentRecommendationExposures(limit: Int = 20) throws -> [StoredRecommendationExposure] {
+        try database.read { db in
+            try Row.fetchAll(db, sql: "SELECT id, payload, created_at, rewarded_at, reward FROM recommendation_exposures ORDER BY created_at DESC LIMIT ?", arguments: [max(1, limit)]).compactMap { row in
+                guard let id = UUID(uuidString: row["id"]) else { return nil }
+                return StoredRecommendationExposure(id: id, payload: row["payload"], createdAt: row["created_at"], rewardedAt: row["rewarded_at"], reward: row["reward"])
+            }
+        }
+    }
+
     @discardableResult
     public func markRecommendationExposureRewarded(id: UUID, reward: Double, at date: Date = Date()) throws -> Bool {
         try database.write { db in

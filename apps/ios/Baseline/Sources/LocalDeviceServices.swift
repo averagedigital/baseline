@@ -12,6 +12,15 @@ struct LocalFoodItem: Codable, Equatable, Sendable, Identifiable {
     let labelConfidence: Double; let portionConfidence: Double?; let fdcID: Int?; let kcalPer100g: Double
     let nutrientSource: String; let caloriesLow: Double?; let caloriesHigh: Double?
 }
+struct PersistedFoodItem: Codable, Equatable, Sendable {
+    let name: String; let estimatedGrams: Double?; let gramsLow: Double?; let gramsHigh: Double?
+    let labelConfidence: Double; let portionConfidence: Double?; let fdcID: Int?; let kcalPer100g: Double
+    let nutrientSource: String; let caloriesLow: Double?; let caloriesHigh: Double?
+}
+struct PersistedFoodObservation: Codable, Equatable, Sendable {
+    let id: UUID; let capturedAt: Date; let items: [PersistedFoodItem]; let caloriesLow: Double?; let caloriesHigh: Double?
+    var localItems: [LocalFoodItem] { items.map { LocalFoodItem(name: $0.name, estimatedGrams: $0.estimatedGrams, gramsLow: $0.gramsLow, gramsHigh: $0.gramsHigh, labelConfidence: $0.labelConfidence, portionConfidence: $0.portionConfidence, fdcID: $0.fdcID, kcalPer100g: $0.kcalPer100g, nutrientSource: $0.nutrientSource, caloriesLow: $0.caloriesLow, caloriesHigh: $0.caloriesHigh) } }
+}
 struct LocalFoodAnalysis: Codable, Equatable, Sendable {
     let containsFood: Bool; let stored: Bool; let duplicateOf: UUID?; let observationID: UUID?
     let confidence: Double; let caloriesLow: Double?; let caloriesHigh: Double?; let items: [LocalFoodItem]
@@ -25,23 +34,23 @@ struct LocalLatestSession: Codable, Equatable, Sendable {
     let id: UUID; let observedTo: Date; let trackingCoverage: Double?; let activeTime: Double?
     let restTime: Double?; let trackingGapTime: Double?; let setCount: Int?
 }
-struct LocalLatestFood: Codable, Equatable, Sendable { let id: UUID; let capturedAt: Date; let caloriesLow: Double?; let caloriesHigh: Double?; let items: [LocalFoodItem] }
+typealias LocalLatestFood = PersistedFoodObservation
 struct LocalHome: Codable, Equatable, Sendable {
     let latestSession: LocalLatestSession?; let latestFood: LocalLatestFood?; let suggestedAction: String
     let recommendationIsPersonalized: Bool; let recommendationConfidence: Double
     let predictedDifficulty: Double?; let difficultyConfidence: Double
     let recommendationExposureID: UUID?
 }
-struct PersonalizationContext: Codable, Equatable, Sendable {
-    let activeMinutes: Double; let setCount: Int; let workRestRatio: Double; let trackingCoverage: Double
-    let sevenDayActiveMinutes: Double; let hoursSincePreviousSession: Double; let recentFoodKcalMidpoint: Double
-}
 struct LocalFeedbackPayload: Codable, Sendable { let sourceEvidenceID: UUID; let rpe: Double; let note: String }
 struct LocalRecommendationRewardPayload: Codable, Sendable { let exposureID: UUID; let reward: Double }
-enum LocalCoachError: LocalizedError { case unavailable; var errorDescription: String? { "Локальная языковая модель недоступна на этом устройстве." } }
+enum LocalCoachError: LocalizedError { case unavailable, unsupportedLocale, contextWindowExceeded, refused, failed
+    var errorDescription: String? { switch self { case .unavailable: "Локальная языковая модель недоступна на этом устройстве."; case .unsupportedLocale: "Язык запроса не поддерживается локальной моделью."; case .contextWindowExceeded: "Контекст Coach слишком большой."; case .refused: "Локальная модель не смогла ответить на этот запрос."; case .failed: "Не удалось получить ответ Coach." } }
+}
 
 actor LocalDeviceServices {
     private let store: AthleteStore?
+    private var nutritionDatabase: NutritionDatabase?
+    private let coachGenerator = FoundationModelsCoachAdapter()
 
     init(store: AthleteStore? = nil) {
         if let store { self.store = store }
@@ -67,9 +76,15 @@ actor LocalDeviceServices {
         let prediction = state.difficulty.predict(features: features)
         var exposureID: UUID?
         if recommendation.personalized {
-            let exposure = RecommendationExposure(action: recommendation.action, features: features, contextDigest: evidence.contentDigest)
-            try await store.saveRecommendationExposure(StoredRecommendationExposure(id: exposure.id, payload: JSONEncoder().encode(exposure), createdAt: exposure.createdAt))
-            exposureID = exposure.id
+            let existing = try await store.recentRecommendationExposures(limit: 20).compactMap { stored -> (StoredRecommendationExposure, RecommendationExposure)? in
+                guard let value = try? JSONDecoder().decode(RecommendationExposure.self, from: stored.payload) else { return nil }
+                return (stored, value)
+            }.first { $0.0.rewardedAt == nil && $0.1.contextDigest == evidence.contentDigest && $0.1.action == recommendation.action }?.0
+            if let existing { exposureID = existing.id } else {
+                let exposure = RecommendationExposure(action: recommendation.action, features: features, contextDigest: evidence.contentDigest)
+                try await store.saveRecommendationExposure(StoredRecommendationExposure(id: exposure.id, payload: JSONEncoder().encode(exposure), createdAt: exposure.createdAt))
+                exposureID = exposure.id
+            }
         }
         return LocalHome(latestSession: session, latestFood: latestFood, suggestedAction: recommendation.action.rawValue, recommendationIsPersonalized: recommendation.personalized, recommendationConfidence: recommendation.confidence, predictedDifficulty: prediction, difficultyConfidence: state.difficulty.dataConfidence, recommendationExposureID: exposureID)
     }
@@ -77,23 +92,26 @@ actor LocalDeviceServices {
     func uploadEvidence<Payload: Encodable & Sendable>(envelope: EvidenceEnvelope, payload: Payload) async throws { guard let store else { throw LocalStorageError.unavailable }; try await store.appendEvidence(envelope, payload: payload) }
 
     func analyzeFood(detections: [FoodDetection], capturedAt: Date) async throws -> LocalFoodAnalysis {
-        guard let url = Bundle.main.url(forResource: "nutrition", withExtension: "sqlite") else { throw FoodDetectorUnavailableError.nutritionDatabaseMissing }
-        let database = try NutritionDatabase(path: url.path)
+        if nutritionDatabase == nil, let url = Bundle.main.url(forResource: "nutrition", withExtension: "sqlite") { nutritionDatabase = try NutritionDatabase(path: url.path) }
         let items = detections.compactMap { detection -> LocalFoodItem? in
-            guard let item = database.match(detection.label) else { return nil }
-            return LocalFoodItem(name: item.canonicalName, estimatedGrams: nil, gramsLow: nil, gramsHigh: nil, labelConfidence: detection.confidence, portionConfidence: nil, fdcID: nil, kcalPer100g: item.kcalPer100g, nutrientSource: "nutrition.sqlite", caloriesLow: nil, caloriesHigh: nil)
+            let item = nutritionDatabase?.match(detection.label)
+            return LocalFoodItem(name: item?.canonicalName ?? detection.label, estimatedGrams: nil, gramsLow: nil, gramsHigh: nil, labelConfidence: detection.confidence, portionConfidence: nil, fdcID: nil, kcalPer100g: item?.kcalPer100g ?? 0, nutrientSource: item == nil ? "unavailable" : "nutrition.sqlite", caloriesLow: nil, caloriesHigh: nil)
         }
         guard !items.isEmpty else { return LocalFoodAnalysis(containsFood: false, stored: false, duplicateOf: nil, observationID: nil, confidence: 0, caloriesLow: nil, caloriesHigh: nil, items: []) }
         let observationID = UUID()
-        let snapshot = LocalLatestFood(id: observationID, capturedAt: capturedAt, caloriesLow: nil, caloriesHigh: nil, items: items)
+        let snapshot = PersistedFoodObservation(id: observationID, capturedAt: capturedAt, items: items.map { PersistedFoodItem(name: $0.name, estimatedGrams: $0.estimatedGrams, gramsLow: $0.gramsLow, gramsHigh: $0.gramsHigh, labelConfidence: $0.labelConfidence, portionConfidence: $0.portionConfidence, fdcID: $0.fdcID, kcalPer100g: $0.kcalPer100g, nutrientSource: $0.nutrientSource, caloriesLow: $0.caloriesLow, caloriesHigh: $0.caloriesHigh) }, caloriesLow: nil, caloriesHigh: nil)
         try await store?.saveFoodObservation(StoredFoodObservation(id: observationID, payload: JSONEncoder().encode(snapshot), capturedAt: capturedAt))
         return LocalFoodAnalysis(containsFood: true, stored: true, duplicateOf: nil, observationID: observationID, confidence: items.map(\.labelConfidence).min() ?? 0, caloriesLow: nil, caloriesHigh: nil, items: items)
     }
 
     func chat(threadID: UUID?, message: String) async throws -> LocalChatResponse {
         guard let store else { throw LocalStorageError.unavailable }
-        let generator = FoundationModelsCoachAdapter()
-        guard generator.availability == .available else { throw LocalCoachError.unavailable }
+        let generator = coachGenerator
+        switch generator.availability {
+        case .available: break
+        case .unsupportedLocale: throw LocalCoachError.unsupportedLocale
+        default: throw LocalCoachError.unavailable
+        }
         let thread: UUID
         if let threadID {
             guard try await store.chatThreads().contains(where: { $0.id == threadID }) else { throw AthleteStoreError.invalidIdentifier(threadID.uuidString) }
@@ -103,13 +121,16 @@ actor LocalDeviceServices {
         }
         try await store.appendChatMessage(ChatHistoryMessage(threadID: thread, role: .user, text: message))
         let facts = try await coachFacts(store: store)
-        let request = CoachGenerationRequest(prompt: message, facts: facts)
+        let history = try await store.chatMessages(threadID: thread).suffix(12).dropLast().map { CoachConversationTurn(role: $0.role == .user ? .user : .assistant, text: $0.text) }
+        let request = CoachGenerationRequest(prompt: message, facts: facts, conversation: Array(history), threadID: thread)
         var output: CoachOutput
+        var previousOutput = ""
         do {
             output = try await generator.generate(request: request)
+            previousOutput = String(data: try JSONEncoder().encode(output), encoding: .utf8) ?? ""
             try GroundingValidator().validate(output, facts: facts)
         } catch {
-            let repaired = try await generator.generate(request: CoachGenerationRequest(prompt: "Repair the previous JSON using only these facts. User request: \(message)", facts: facts))
+            let repaired = try await generator.generate(request: CoachGenerationRequest(prompt: "PREVIOUS_OUTPUT\n\(previousOutput)\nVALIDATION_ERRORS\n- \(error)\nORIGINAL_USER_REQUEST\n\(message)", facts: facts, conversation: Array(history), threadID: thread))
             try GroundingValidator().validate(repaired, facts: facts)
             output = repaired
         }
@@ -123,19 +144,53 @@ actor LocalDeviceServices {
             try await store.saveRecommendationExposure(StoredRecommendationExposure(id: exposure.id, payload: JSONEncoder().encode(exposure), createdAt: exposure.createdAt))
             exposureID = exposure.id
         }
-        return LocalChatResponse(threadID: thread, answerMarkdown: answer, recommendationCategory: action?.rawValue ?? "none", evidenceIDs: facts.compactMap { UUID(uuidString: $0.id) }, foodIDs: [], contextDigest: "local", feedbackContextID: exposureID)
+        return LocalChatResponse(threadID: thread, answerMarkdown: answer, recommendationCategory: action?.rawValue ?? "none", evidenceIDs: Array(Set(facts.compactMap { $0.sourceEvidenceID })), foodIDs: Array(Set(facts.compactMap { $0.sourceFoodObservationID })), contextDigest: "local", feedbackContextID: exposureID)
     }
 
     private func coachFacts(store: AthleteStore) async throws -> [GroundedFact] {
         guard let envelope = try await store.latestEvidence(kind: "activity.session.v2"), let session = try await store.payload(for: envelope.id, as: SessionEvidenceV2.self) else { return [] }
         var facts = CoachContextAssembler().assemble(session: SessionFacts(activeMinutes: session.activeTime / 60, activeBlocks: session.activeBlockCount, coverage: session.trackingCoverage), personalization: nil, food: nil).facts
         facts.append(contentsOf: [
-            GroundedFact(id: envelope.id.uuidString, value: "session", numericValue: nil),
-            GroundedFact(id: "rest_minutes", value: String(format: "%.1f", session.restTime / 60), numericValue: session.restTime / 60),
-            GroundedFact(id: "tracking_gaps_minutes", value: String(format: "%.1f", session.trackingGapTime / 60), numericValue: session.trackingGapTime / 60),
-            GroundedFact(id: "capture_quality", value: "ambiguous=\(session.captureQuality.ambiguousFrameCount), identity=\(session.captureQuality.identityDiscontinuityCount), warmup=\(session.captureQuality.warmupFrameCount)"),
+            .text("session", "session", sourceEvidenceID: envelope.id),
+            .number("rest_minutes", session.restTime / 60, sourceEvidenceID: envelope.id),
+            .number("tracking_gaps_minutes", session.trackingGapTime / 60, sourceEvidenceID: envelope.id),
+            .text("capture_quality", "ambiguous=\(session.captureQuality.ambiguousFrameCount), identity=\(session.captureQuality.identityDiscontinuityCount), warmup=\(session.captureQuality.warmupFrameCount)", sourceEvidenceID: envelope.id),
         ])
-        facts.append(GroundedFact(id: "timeline", value: session.segments.prefix(100).map { "\($0.state.rawValue) \($0.startOffset)-\($0.endOffset)" }.joined(separator: "; ")))
+        facts += [
+            .text("session.observed_from", ISO8601DateFormatter().string(from: session.observedFrom), sourceEvidenceID: envelope.id),
+            .text("session.observed_to", ISO8601DateFormatter().string(from: session.observedTo), sourceEvidenceID: envelope.id),
+            .number("session.duration_minutes", session.observedTo.timeIntervalSince(session.observedFrom) / 60, sourceEvidenceID: envelope.id),
+            .number("session.active_minutes", session.activeTime / 60, sourceEvidenceID: envelope.id),
+            .number("session.rest_minutes", session.restTime / 60, sourceEvidenceID: envelope.id),
+            .number("session.tracking_gap_minutes", session.trackingGapTime / 60, sourceEvidenceID: envelope.id),
+            .number("session.active_block_count", Double(session.activeBlockCount), sourceEvidenceID: envelope.id),
+            .number("session.tracking_coverage", session.trackingCoverage, sourceEvidenceID: envelope.id),
+            .text("session.algorithm_version", session.algorithmVersion, sourceEvidenceID: envelope.id),
+            .number("capture.ambiguous_frame_count", Double(session.captureQuality.ambiguousFrameCount), sourceEvidenceID: envelope.id),
+            .number("capture.identity_discontinuity_count", Double(session.captureQuality.identityDiscontinuityCount), sourceEvidenceID: envelope.id),
+            .number("capture.warmup_frame_count", Double(session.captureQuality.warmupFrameCount), sourceEvidenceID: envelope.id),
+            .number("capture.rejected_motion_frame_count", Double(session.captureQuality.rejectedMotionFrameCount), sourceEvidenceID: envelope.id),
+            .number("capture.tracking_gap_count", Double(session.captureQuality.trackingGapCount), sourceEvidenceID: envelope.id),
+        ]
+        facts.append(.text("timeline", session.segments.prefix(80).map { "\($0.state.rawValue) \($0.startOffset)-\($0.endOffset)" }.joined(separator: "; "), sourceEvidenceID: envelope.id))
+        for recent in try await store.evidenceEnvelopes(kind: "activity.session.v2", limit: 5) {
+            guard recent.id != envelope.id, let value = try await store.payload(for: recent.id, as: SessionEvidenceV2.self) else { continue }
+            let prefix = "recent_session:\(recent.id.uuidString)"
+            facts += [.text("\(prefix):date", ISO8601DateFormatter().string(from: value.observedTo), sourceEvidenceID: recent.id), .number("\(prefix):active_minutes", value.activeTime / 60, sourceEvidenceID: recent.id), .number("\(prefix):rest_minutes", value.restTime / 60, sourceEvidenceID: recent.id), .number("\(prefix):active_blocks", Double(value.activeBlockCount), sourceEvidenceID: recent.id), .number("\(prefix):coverage", value.trackingCoverage, sourceEvidenceID: recent.id)]
+        }
+        for narrative in try await store.evidenceEnvelopes(kind: "user.narrative.v1", limit: 10) {
+            guard let source = narrative.derivedFrom.first, let rpe = try await store.payload(for: narrative.id, as: SessionRPEEvidence.self) else { continue }
+            facts += [.number("session:\(source.uuidString):rpe", rpe.rpe, sourceEvidenceID: source), .text("session:\(source.uuidString):rpe_note", rpe.note ?? "", sourceEvidenceID: source)]
+        }
+        for observation in try await store.recentFoodObservations(limit: 5) where !observation.dismissed {
+            guard let food = try? JSONDecoder().decode(PersistedFoodObservation.self, from: observation.payload) else { continue }
+            facts.append(.text("food:\(food.id.uuidString):names", food.items.map { $0.name }.joined(separator: ", "), sourceFoodObservationID: food.id))
+            facts.append(.text("food:\(food.id.uuidString):confidence", food.items.map { String(format: "%.2f", $0.labelConfidence) }.joined(separator: ", "), sourceFoodObservationID: food.id))
+            if let low = food.caloriesLow, let high = food.caloriesHigh { facts += [.number("food:\(food.id.uuidString):kcal_low", low, sourceFoodObservationID: food.id), .number("food:\(food.id.uuidString):kcal_high", high, sourceFoodObservationID: food.id)] }
+        }
+        let state = try await store.loadPersonalizationState(as: PersonalizationState.self) ?? PersonalizationState()
+        facts += [.number("personalization.difficulty_sample_count", Double(state.difficulty.samples)), .number("personalization.difficulty_confidence", state.difficulty.dataConfidence), .number("personalization.explicit_reward_count", Double(state.bandit.totalExplicitRewards)), .boolean("personalization.recommendation_personalized", state.bandit.totalExplicitRewards >= 5)]
+        if let prediction = state.difficulty.predict(features: try await PersonalizationFeatureBuilder(store: store).features(for: envelope.id)) { facts.append(.number("personalization.predicted_difficulty", prediction)) }
         return facts
     }
 

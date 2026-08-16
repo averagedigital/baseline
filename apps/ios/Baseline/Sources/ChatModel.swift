@@ -41,12 +41,10 @@ final class ChatModel {
     var errorMessage: String?
 
     private let localServices: LocalDeviceServices
-    private let feedbackContext: PersonalizationContext
     private var threadID: UUID?
 
-    init(localServices: LocalDeviceServices, feedbackContext: PersonalizationContext) {
+    init(localServices: LocalDeviceServices) {
         self.localServices = localServices
-        self.feedbackContext = feedbackContext
     }
 
     func send(_ value: String? = nil) async {
@@ -98,10 +96,9 @@ struct CoachScreen: View {
 
     init(
         localServices: LocalDeviceServices,
-        feedbackContext: PersonalizationContext,
         initialPrompt: String? = nil
     ) {
-        _model = State(initialValue: ChatModel(localServices: localServices, feedbackContext: feedbackContext))
+        _model = State(initialValue: ChatModel(localServices: localServices))
         self.initialPrompt = initialPrompt
     }
 

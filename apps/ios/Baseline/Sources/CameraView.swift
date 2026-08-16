@@ -58,7 +58,6 @@ struct PendingSessionFeedback: Identifiable, Equatable, Sendable {
     let id = UUID()
     let feedbackEventID: UUID
     let evidenceID: UUID
-    let context: PersonalizationContext
     let summary: SessionSummaryViewData
 }
 
@@ -300,22 +299,9 @@ final class CameraModel {
             )
             lastSession = viewData
             liveSetCount = summary.setCount
-            let context = PersonalizationContext(
-                activeMinutes: summary.activeTime / 60,
-                setCount: summary.setCount,
-                workRestRatio: summary.activeTime / max(summary.restTime, 60),
-                trackingCoverage: summary.coverage,
-                sevenDayActiveMinutes: summary.activeTime / 60,
-                hoursSincePreviousSession: 72,
-                recentFoodKcalMidpoint: latestFood.flatMap { food in
-                    guard let low = food.caloriesLow, let high = food.caloriesHigh else { return nil }
-                    return (low + high) / 2
-                } ?? 0
-            )
             pendingFeedback = PendingSessionFeedback(
                 feedbackEventID: UUID(),
                 evidenceID: envelope.id,
-                context: context,
                 summary: viewData
             )
             await refreshHome()
@@ -365,7 +351,7 @@ final class CameraModel {
                     confidence: food.items.map(\.labelConfidence).min() ?? 0,
                     caloriesLow: food.caloriesLow,
                     caloriesHigh: food.caloriesHigh,
-                    items: food.items
+                    items: food.localItems
                 )
             }
         } catch {

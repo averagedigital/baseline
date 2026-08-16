@@ -36,7 +36,6 @@ struct AppShell: View {
         .sheet(isPresented: $showsCoach) {
             CoachScreen(
                 localServices: model.localServices,
-                feedbackContext: feedbackContext,
                 initialPrompt: coachPrompt
             )
         }
@@ -79,35 +78,6 @@ struct AppShell: View {
             }
             .accessibilityLabel("Настройки")
         }
-    }
-
-    private var feedbackContext: PersonalizationContext {
-        if let feedback = model.pendingFeedback {
-            return feedback.context
-        }
-        if let session = model.lastSession {
-            return PersonalizationContext(
-                activeMinutes: session.activeMinutes,
-                setCount: session.setCount,
-                workRestRatio: session.activeMinutes / max(session.restMinutes, 1),
-                trackingCoverage: session.trackingCoverage,
-                sevenDayActiveMinutes: session.activeMinutes,
-                hoursSincePreviousSession: 72,
-                recentFoodKcalMidpoint: model.latestFood.flatMap { food in
-                    guard let low = food.caloriesLow, let high = food.caloriesHigh else { return nil }
-                    return (low + high) / 2
-                } ?? 0
-            )
-        }
-        return PersonalizationContext(
-            activeMinutes: 0,
-            setCount: 0,
-            workRestRatio: 0,
-            trackingCoverage: 0,
-            sevenDayActiveMinutes: 0,
-            hoursSincePreviousSession: 72,
-            recentFoodKcalMidpoint: 0
-        )
     }
 
     private var errorBinding: Binding<Bool> {

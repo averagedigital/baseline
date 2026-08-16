@@ -2,13 +2,13 @@ import Testing
 @testable import AthleteIntelligence
 
 @Test func groundingRejectsWrongNumber() {
-    let facts = [GroundedFact(id: "active", value: "8", numericValue: 8)]
+    let facts: [GroundedFact] = [.number("active", 8)]
     let output = CoachOutput(claims: [CoachClaim(text: "999 blocks", factIDs: ["active"], epistemicType: .computed)])
     #expect(throws: GroundingError.numericMismatch("999 blocks")) { try GroundingValidator().validate(output, facts: facts) }
 }
 
 @Test func groundingAcceptsReferencedNumber() throws {
-    let facts = [GroundedFact(id: "active", value: "8", numericValue: 8)]
+    let facts: [GroundedFact] = [.number("active", 8)]
     let output = CoachOutput(claims: [CoachClaim(text: "8 blocks", factIDs: ["active"], epistemicType: .computed)])
     try GroundingValidator().validate(output, facts: facts)
 }
@@ -20,7 +20,7 @@ import Testing
         food: FoodFacts(caloriesMidpoint: nil)
     )
     #expect(context.facts.map(\.id) == ["session.active_minutes", "session.active_blocks", "session.coverage", "personalization.predicted_difficulty"])
-    #expect(context.facts.last?.numericValue == 7.5)
+    #expect(context.facts.last?.numberValue == 7.5)
 }
 
 @Test func unavailableCoachDoesNotFabricateAnswer() async {

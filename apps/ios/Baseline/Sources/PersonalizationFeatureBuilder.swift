@@ -24,7 +24,7 @@ struct PersonalizationFeatureBuilder: Sendable {
             observation.capturedAt <= source.observedTo && !observation.dismissed
         }.prefix(7)
         let nutritionSignal = eligibleFoods.reduce(0.0) { total, observation in
-            guard let analysis = try? JSONDecoder().decode(LocalFoodAnalysis.self, from: observation.payload) else { return total }
+            guard let analysis = try? JSONDecoder().decode(PersistedFoodObservation.self, from: observation.payload) else { return total }
             guard let low = analysis.caloriesLow, let high = analysis.caloriesHigh else { return total }
             return total + (low + high) / 2
         }
