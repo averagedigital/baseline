@@ -38,3 +38,44 @@ import Testing
     #expect(first)
     #expect(!second)
 }
+
+@Test func ambiguousIdentitySampleDoesNotPolluteGallery() {
+    var gallery = PersonalIdentityGallery()
+    let accepted = gallery.update(embedding: [1, 0], quality: 0.95, isAmbiguous: false)
+    #expect(accepted)
+    let before = gallery
+    let rejected = gallery.update(embedding: [0, 1], quality: 0.99, isAmbiguous: true)
+    #expect(!rejected)
+    #expect(gallery == before)
+    #expect(gallery.similarity(to: [1, 0]) == 1)
+}
+
+@Test func exercisePrototypeRequiresPersonalExamplesAndAsksOnLowConfidence() {
+    var library = ExercisePrototypeLibrary()
+    #expect(library.classify([1, 0]).needsConfirmation)
+    library.confirm(exerciseID: "bench", displayName: "Жим лёжа", representation: [1, 0], at: Date(timeIntervalSince1970: 1))
+    #expect(library.classify([0.99, 0.01]).needsConfirmation)
+    library.confirm(exerciseID: "bench", displayName: "Жим лёжа", representation: [0.98, 0.02], at: Date(timeIntervalSince1970: 2))
+    let result = library.classify([0.97, 0.03])
+    #expect(result.exerciseID == "bench")
+    #expect(!result.needsConfirmation)
+}
+
+@Test func movementBaselineReportsOnlyObservedRobustDeviation() {
+    var baseline = PersonalMovementBaseline()
+    for value in [0.78, 0.80, 0.81, 0.79, 0.82] {
+        baseline.observe(exerciseID: "squat", feature: "rom", value: value, confidence: 0.9)
+    }
+    #expect(baseline.deviation(exerciseID: "squat", feature: "rom", value: 0.80, confidence: 0.9) == nil)
+    let deviation = baseline.deviation(exerciseID: "squat", feature: "rom", value: 0.45, confidence: 0.9)
+    #expect(deviation?.direction == .belowUsual)
+    #expect(baseline.deviation(exerciseID: "squat", feature: "unobserved", value: 0.1, confidence: 1) == nil)
+}
+
+@Test func continualPersonalizationCanBeReset() {
+    var state = ContinualPersonalizationState()
+    _ = state.identity.update(embedding: [1, 0], quality: 1, isAmbiguous: false)
+    state.exercises.confirm(exerciseID: "custom", displayName: "Моё упражнение", representation: [0, 1])
+    state.reset()
+    #expect(state == ContinualPersonalizationState())
+}

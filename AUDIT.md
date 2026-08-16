@@ -16,4 +16,4 @@ Baseline is local-first. Camera, pose, tracking, motion, evidence, nutrition mat
 
 ## Optional assets
 
-The CoreML food detector and Apple Foundation Models runtime may be unavailable on a build or device. The app reports unavailable status and retains all other local functionality; it does not silently use remote or fake provider data.
+Food detection requires the optional `apps/ios/Baseline/Resources/FoodDetector.mlmodel` or `.mlpackage` asset. Nutrition matching requires a locally generated `apps/ios/Baseline/Resources/nutrition.sqlite` asset. Apple Foundation Models Coach requires a supported Apple Intelligence device and supported locale. Any missing asset is reported explicitly; bbox labels remain available without nutrition matching, and no remote or fake provider data is used.

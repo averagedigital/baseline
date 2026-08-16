@@ -90,6 +90,128 @@ func deletesChatHistory() async throws {
     #expect(try await store.chatMessages(threadID: thread.id).isEmpty)
 }
 
+@Test("Chat attachments support image-only messages and survive restart")
+func chatAttachmentsSurviveRestart() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let databasePath = directory.appendingPathComponent("db.sqlite").path
+    let imageURL = directory.appendingPathComponent("meal.jpg")
+    try Data([1, 2, 3]).write(to: imageURL)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let threadID: UUID
+    do {
+        let store = try AthleteStore(path: databasePath)
+        let thread = try await store.createChat(title: "Обед")
+        threadID = thread.id
+        let messageID = UUID()
+        let attachments = [
+            ChatAttachment(messageID: messageID, localPath: imageURL.path, mimeType: "image/jpeg", width: 1200, height: 800, byteSize: 3),
+            ChatAttachment(messageID: messageID, localPath: imageURL.path + ".second", mimeType: "image/jpeg", width: 800, height: 1200, byteSize: 4),
+        ]
+        let citation = ChatCitation(messageID: messageID, title: "Источник", url: try #require(URL(string: "https://example.com/food")))
+        try await store.appendChatMessage(ChatHistoryMessage(id: messageID, threadID: thread.id, role: .user, text: "", attachments: attachments, citations: [citation]))
+    }
+
+    let restored = try AthleteStore(path: databasePath)
+    let message = try #require(try await restored.chatMessages(threadID: threadID).first)
+    #expect(message.text.isEmpty)
+    #expect(message.attachments.count == 2)
+    #expect(message.attachments.first?.width == 1200)
+    #expect(message.citations.first?.url.absoluteString == "https://example.com/food")
+    #expect(try await restored.chatThread(containingMessageID: message.id)?.id == threadID)
+}
+
+@Test("Named personalization states survive restart and reset together")
+func namedPersonalizationStatePersistsAndResets() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let path = directory.appendingPathComponent("state.sqlite").path
+    try await AthleteStore(path: path).savePersonalizationState(["samples": 3], id: "continual-personalization-v1", at: Date())
+
+    let restored = try AthleteStore(path: path)
+    #expect(try await restored.loadPersonalizationState(id: "continual-personalization-v1", as: [String: Int].self) == ["samples": 3])
+    try await restored.clearPersonalizationState()
+    #expect(try await restored.loadPersonalizationState(id: "continual-personalization-v1", as: [String: Int].self) == nil)
+}
+
+@Test("Deleting a chat removes attachment files")
+func deletingChatRemovesAttachmentFiles() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("photo.jpg")
+    let transport = directory.appendingPathComponent("photo-transport.jpg")
+    try Data([1]).write(to: file)
+    try Data([2]).write(to: transport)
+    let store = try AthleteStore.inMemory()
+    let thread = try await store.createChat(title: "Фото")
+    let messageID = UUID()
+    try await store.appendChatMessage(ChatHistoryMessage(
+        id: messageID,
+        threadID: thread.id,
+        role: .user,
+        text: "Фото",
+        attachments: [ChatAttachment(messageID: messageID, localPath: file.path, transportPath: transport.path, mimeType: "image/jpeg", width: 1, height: 1, byteSize: 1)]
+    ))
+
+    try await store.deleteChat(id: thread.id)
+
+    #expect(!FileManager.default.fileExists(atPath: file.path))
+    #expect(!FileManager.default.fileExists(atPath: transport.path))
+}
+
+@Test("Food diary tool calls are atomic and idempotent")
+func foodDiaryCreateIsAtomicAndIdempotent() async throws {
+    let store = try AthleteStore.inMemory()
+    let toolCallID = "call-create-1"
+    let request = FoodEntryDraft(
+        consumedAt: Date(timeIntervalSince1970: 1_000),
+        mealType: .lunch,
+        items: [FoodItemDraft(name: "Паста", amount: .range(low: 150, high: 220), unit: "g", caloriesKcal: .range(low: 240, high: 360), proteinG: .unknown, fatG: .unknown, carbohydratesG: .range(low: 45, high: 70), provenance: .modelEstimated, confidence: 0.72)],
+        notes: "По фотографии"
+    )
+
+    let first = try await store.createFoodEntry(request, toolCallID: toolCallID)
+    let repeated = try await store.createFoodEntry(request, toolCallID: toolCallID)
+
+    #expect(first == repeated)
+    #expect(try await store.foodEntries(from: Date(timeIntervalSince1970: 0), to: Date(timeIntervalSince1970: 2_000)).count == 1)
+    await #expect(throws: (any Error).self) {
+        try await store.createFoodEntry(
+            FoodEntryDraft(consumedAt: Date(), mealType: .snack, items: [FoodItemDraft(name: "", amount: .unknown, unit: nil, caloriesKcal: .unknown, proteinG: .unknown, fatG: .unknown, carbohydratesG: .unknown, provenance: .modelEstimated, confidence: 0.5)]),
+            toolCallID: "invalid"
+        )
+    }
+    #expect(try await store.foodEntries(from: Date(timeIntervalSince1970: 0), to: Date.distantFuture).count == 1)
+}
+
+@Test("Food diary supports partial update, read and delete")
+func foodDiaryUpdateAndDelete() async throws {
+    let store = try AthleteStore.inMemory()
+    let created = try await store.createFoodEntry(
+        FoodEntryDraft(consumedAt: Date(timeIntervalSince1970: 1_000), mealType: .breakfast, items: [FoodItemDraft(name: "Курица", amount: .exact(180), unit: "g", caloriesKcal: .exact(297), proteinG: .exact(55), fatG: .exact(6), carbohydratesG: .exact(0), provenance: .modelEstimated, confidence: 0.78)]),
+        toolCallID: "create"
+    )
+    let updated = try await store.updateFoodEntry(id: created.id, patch: FoodEntryPatch(notes: "Уточнено пользователем"), toolCallID: "update")
+    #expect(updated.notes == "Уточнено пользователем")
+    #expect(try await store.foodEntry(id: created.id)?.items.first?.name == "Курица")
+
+    #expect(try await store.deleteFoodEntry(id: created.id, toolCallID: "delete"))
+    #expect(try await store.foodEntry(id: created.id) == nil)
+    #expect(try await store.deleteFoodEntry(id: created.id, toolCallID: "delete"))
+}
+
+@Test("Legacy provider configuration decodes with disabled optional capabilities")
+func legacyProviderConfigurationIsBackwardCompatible() throws {
+    let data = Data(#"{"id":"00000000-0000-0000-0000-000000000001","name":"Legacy","baseURL":"https://example.invalid/v1","model":"text-only","isSelected":true}"#.utf8)
+    let provider = try JSONDecoder().decode(ProviderConfiguration.self, from: data)
+    #expect(provider.capabilities == .textOnly)
+    #expect(!provider.webSearchEnabled)
+    #expect(provider.reasoningEffort == .off)
+}
+
 @Test("File-backed store восстанавливает state, exposure, food и chat после restart")
 func fileBackedRestartRestoresLocalState() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

@@ -1,7 +1,10 @@
+import CoreML
 import Foundation
 import Testing
+import AthleteCore
 import AthleteNutrition
 import AthleteSensors
+import AthleteStore
 @testable import Baseline
 
 @Test("История интенсивности ограничена временем, а не числом кадров")
@@ -22,6 +25,118 @@ func boundsIntensityByTimeWindow() {
 func togglesCameraPosition() {
     #expect(CaptureCameraPosition.front.toggled == .back)
     #expect(CaptureCameraPosition.back.toggled == .front)
+}
+
+@Test("Продукт имеет ровно две основные вкладки")
+func hasExactlyTwoProductTabs() {
+    #expect(AppTab.allCases == [.camera, .chat])
+}
+
+@MainActor
+@Test("Тренировка запускается автоматически без отдельного пользовательского шага")
+func startsWorkoutWithoutManualInput() {
+    let model = CameraModel(store: nil, localServices: LocalDeviceServices(store: nil))
+
+    model.startWorkout()
+
+    #expect(model.isWorkoutRecording)
+}
+
+@Test("Food bbox показывает распознанное и доступные калории")
+func formatsFoodOverlayWithCalories() {
+    let nutrition = LocalFoodItem(
+        name: "Рис",
+        estimatedGrams: nil,
+        gramsLow: nil,
+        gramsHigh: nil,
+        labelConfidence: 0.91,
+        portionConfidence: nil,
+        fdcID: nil,
+        kcalPer100g: 130,
+        nutrientSource: "nutrition.sqlite",
+        caloriesLow: nil,
+        caloriesHigh: nil
+    )
+
+    #expect(FoodOverlayText.make(label: "rice", confidence: 0.91, nutrition: nutrition) == "Рис · 91% · 130 ккал/100 г")
+}
+
+@Test("Нулевая интенсивность остаётся видимой внутри графика")
+func keepsRestingIntensityInsideChartBounds() {
+    #expect(MotionIntensityChartGeometry.y(for: 0, height: 58) == 57)
+}
+
+@Test("Кофе доступен через класс cup из bundled nutrition database")
+func resolvesCupAsCoffee() async throws {
+    let services = LocalDeviceServices(store: nil)
+
+    let result = try await services.analyzeFood(
+        detections: [FoodDetection(label: "cup", confidence: 0.9, boundingBox: .init(x: 0, y: 0, width: 1, height: 1))],
+        capturedAt: Date()
+    )
+
+    #expect(result.items.first?.name == "Кофе")
+    #expect(result.items.first?.kcalPer100g == 1)
+}
+
+@Test("Food detector отбрасывает не-пищевые COCO классы")
+func filtersNonFoodCocoLabels() {
+    #expect(FoodLabelPolicy.isSupported("cup"))
+    #expect(FoodLabelPolicy.isSupported("pizza"))
+    #expect(!FoodLabelPolicy.isSupported("person"))
+    #expect(!FoodLabelPolicy.isSupported("chair"))
+}
+
+@Test("В анализ калорий попадают только food-классы, даже если debug показывает все bbox")
+func keepsDebugObjectsOutOfNutritionAnalysis() {
+    let detections = [
+        FoodDetection(label: "person", confidence: 0.95, boundingBox: .init(x: 0, y: 0, width: 1, height: 1)),
+        FoodDetection(label: "cup", confidence: 0.8, boundingBox: .init(x: 0, y: 0, width: 1, height: 1)),
+    ]
+
+    #expect(FoodLabelPolicy.analysisDetections(detections).map(\.label) == ["cup"])
+}
+
+@Test("Модель и база питания доступны из app bundle")
+func bundlesFoodRuntimeAssets() async {
+    #expect(FoodObjectDetector(bundle: .main).availability == .available)
+    #expect(await LocalDeviceServices(store: nil).nutritionAvailability() == .available)
+}
+
+@Test("В bundle используется полная YOLOv3 FP16, а не Tiny")
+func bundlesFullYoloModel() throws {
+    let url = try #require(Bundle.main.url(forResource: "FoodDetector", withExtension: "mlmodelc"))
+    let model = try MLModel(contentsOf: url)
+    let metadata = model.modelDescription.metadata[.creatorDefinedKey] as? [String: String]
+
+    #expect(metadata?["com.apple.developer.machine-learning.models.name"] == "YOLOv3FP16.mlmodel")
+}
+
+@Test("Legacy session payload не блокирует облачный Coach")
+func legacySessionDoesNotBlockCloudCoachContext() async throws {
+    let store = try AthleteStore.inMemory()
+    let evidenceID = UUID()
+    let malformedV2 = EvidenceEnvelope(
+        id: evidenceID,
+        moduleID: "org.baseline.activity",
+        moduleVersion: "legacy",
+        kind: "activity.session.v2",
+        observedFrom: Date(timeIntervalSince1970: 100),
+        observedTo: Date(timeIntervalSince1970: 200),
+        ingestedAt: Date(timeIntervalSince1970: 200),
+        epistemicRole: .computed,
+        provenance: Provenance(sourceID: "test", producerID: "test", producerVersion: "1", method: nil),
+        privacyClass: .sensitiveLocal,
+        payload: PayloadReference(mediaType: "application/json", schemaID: "activity.session", schemaVersion: "2", storageURI: "baseline://evidence/\(evidenceID.uuidString)"),
+        derivedFrom: [],
+        supersedes: nil,
+        contentDigest: "sha256:test"
+    )
+    try await store.appendEvidence(malformedV2, payload: ["legacy_set_count": 3])
+
+    let context = try await LocalDeviceServices(store: store).cloudCoachContext(threadID: nil, message: "Что нового?")
+
+    #expect(context.contains("CURRENT USER REQUEST\nЧто нового?"))
 }
 
 @Test("Food bbox переводится из Vision bottom-left в aspect-fill preview")

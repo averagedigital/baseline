@@ -1,0 +1,13 @@
+[
+  {"canonical_name":"Банан","aliases":["banana"],"kcal_per_100g":89,"source":"USDA FoodData Central"},
+  {"canonical_name":"Яблоко","aliases":["apple"],"kcal_per_100g":52,"source":"USDA FoodData Central"},
+  {"canonical_name":"Сэндвич","aliases":["sandwich"],"kcal_per_100g":270,"source":"USDA FoodData Central"},
+  {"canonical_name":"Апельсин","aliases":["orange"],"kcal_per_100g":47,"source":"USDA FoodData Central"},
+  {"canonical_name":"Брокколи","aliases":["broccoli"],"kcal_per_100g":31,"source":"USDA FoodData Central"},
+  {"canonical_name":"Морковь","aliases":["carrot"],"kcal_per_100g":41,"source":"USDA FoodData Central"},
+  {"canonical_name":"Хот-дог","aliases":["hot dog"],"kcal_per_100g":290,"source":"USDA FoodData Central"},
+  {"canonical_name":"Пицца","aliases":["pizza"],"kcal_per_100g":280,"source":"USDA FoodData Central"},
+  {"canonical_name":"Пончик","aliases":["donut","doughnut"],"kcal_per_100g":412,"source":"USDA FoodData Central"},
+  {"canonical_name":"Торт","aliases":["cake"],"kcal_per_100g":374,"source":"USDA FoodData Central"},
+  {"canonical_name":"Кофе","aliases":["cup","coffee","кофе"],"kcal_per_100g":1,"source":"USDA FoodData Central; cup is a COCO detector proxy"}
+]

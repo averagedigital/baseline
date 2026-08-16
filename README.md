@@ -11,7 +11,9 @@ Baseline — fully on-device evidence-first training companion.
 - GRDB/SQLite as the canonical local store;
 - local online personalization from explicit RPE and feedback.
 
-The app does not require a server, login, internet connection, API keys or cloud sync. Raw video and food image bytes are never persisted.
+The local camera pipeline does not persist raw video frames. Images explicitly attached to Coach messages are stored in the app's local Application Support directory; cloud Coach is used only after the user configures a provider API key.
+
+Optional runtime assets are documented in `apps/ios/Baseline/Resources/README.md`: food detection needs `FoodDetector`, nutrition matching needs generated `nutrition.sqlite`, and Foundation Models Coach needs a supported Apple Intelligence device and locale.
 
 ## Modules
 

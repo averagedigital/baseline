@@ -1,7 +1,20 @@
 import Foundation
 import Observation
+import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
+import UIKit
 import AthleteStore
+
+struct PendingChatImage: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let data: Data
+    let mimeType: String
+    let width: Int
+    let height: Int
+}
+
+private enum ChatAttachmentPreparationError: Error { case encodingFailed }
 
 struct CoachMessage: Identifiable, Equatable, Sendable {
     enum Role: Equatable, Sendable {
@@ -11,7 +24,9 @@ struct CoachMessage: Identifiable, Equatable, Sendable {
 
     let id: UUID
     let role: Role
-    let text: String
+    var text: String
+    let attachments: [ChatAttachment]
+    let citations: [ChatCitation]
     let recommendationCategory: String?
     let feedbackContextID: UUID?
     var rating: Int?
@@ -20,6 +35,8 @@ struct CoachMessage: Identifiable, Equatable, Sendable {
         id: UUID = UUID(),
         role: Role,
         text: String,
+        attachments: [ChatAttachment] = [],
+        citations: [ChatCitation] = [],
         recommendationCategory: String? = nil,
         feedbackContextID: UUID? = nil,
         rating: Int? = nil
@@ -27,6 +44,8 @@ struct CoachMessage: Identifiable, Equatable, Sendable {
         self.id = id
         self.role = role
         self.text = text
+        self.attachments = attachments
+        self.citations = citations
         self.recommendationCategory = recommendationCategory
         self.feedbackContextID = feedbackContextID
         self.rating = rating
@@ -41,11 +60,13 @@ final class ChatModel {
     var providers: [ProviderConfiguration] = []
     var selectedProviderID: UUID?
     var draft = ""
+    var pendingImages: [PendingChatImage] = []
     var isSending = false
+    var activity: CoachActivity?
     var errorMessage: String?
     var requiresProviderSettings = false
 
-    private let localServices: LocalDeviceServices
+    let localServices: LocalDeviceServices
     private let keyStore = APIKeyStore()
     private let apiClient = ResponsesAPIClient()
     private var threadID: UUID?
@@ -79,7 +100,7 @@ final class ChatModel {
     private func load(thread: ChatThread, history: [ChatHistoryMessage]) {
         threadID = thread.id
         messages = history.map { item in
-            CoachMessage(id: item.id, role: item.role == .user ? .user : .assistant, text: item.text)
+            CoachMessage(id: item.id, role: item.role == .user ? .user : .assistant, text: item.text, attachments: item.attachments, citations: item.citations)
         }
     }
 
@@ -87,6 +108,7 @@ final class ChatModel {
         threadID = nil
         messages.removeAll()
         draft = ""
+        pendingImages.removeAll()
         errorMessage = nil
     }
 
@@ -100,7 +122,8 @@ final class ChatModel {
 
     func send(_ value: String? = nil) async {
         let text = (value ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending else { return }
+        let images = pendingImages
+        guard (!text.isEmpty || !images.isEmpty), !isSending else { return }
         guard let provider = providers.first(where: { $0.id == selectedProviderID }),
               let apiKey = try? keyStore.load(providerID: provider.id),
               !apiKey.isEmpty else {
@@ -108,37 +131,119 @@ final class ChatModel {
             errorMessage = "Сначала настройте облачного провайдера Coach."
             return
         }
-        messages.append(CoachMessage(role: .user, text: text))
+        guard images.isEmpty || provider.capabilities.supportsVision else {
+            errorMessage = ResponsesAPIError.unsupportedVision.localizedDescription
+            return
+        }
         draft = ""
+        pendingImages.removeAll()
         isSending = true
         errorMessage = nil
+        var streamingMessageID: UUID?
         do {
-            let targetThread = try await ensureThread(title: String(text.prefix(48)))
-            try await localServices.appendChatMessage(ChatHistoryMessage(threadID: targetThread, role: .user, text: text))
+            let title = text.isEmpty ? "Фото питания" : String(text.prefix(48))
+            let targetThread = try await ensureThread(title: title)
+            let messageID = UUID()
+            let prepared = try await Task.detached(priority: .userInitiated) { try Self.persist(images, messageID: messageID) }.value
+            let attachments = prepared.attachments
+            let userMessage = CoachMessage(id: messageID, role: .user, text: text, attachments: attachments)
+            messages.append(userMessage)
+            try await localServices.appendChatMessage(ChatHistoryMessage(id: messageID, threadID: targetThread, role: .user, text: text, attachments: attachments))
             let context = try await localServices.cloudCoachContext(threadID: targetThread, message: text)
             let history = messages.dropLast().suffix(12).map { message in
                 ResponsesInputMessage(role: message.role == .user ? .user : .assistant, content: message.text)
             }
+            let imageURLs = prepared.transportData.map { "data:image/jpeg;base64,\($0.base64EncodedString())" }
+            let current = ResponsesInputMessage(role: .user, content: text, imageDataURLs: imageURLs)
             let prompt = ResponsesInputMessage(role: .user, content: "[BASELINE LOCAL CONTEXT]\n\(context)")
-            let answer = try await apiClient.stream(
+            let pendingAssistantID = UUID()
+            streamingMessageID = pendingAssistantID
+            messages.append(CoachMessage(id: pendingAssistantID, role: .assistant, text: ""))
+            let result = try await apiClient.run(
                 provider: provider,
                 apiKey: apiKey,
-                messages: Array(history) + [prompt],
-                instructions: "Отвечай на языке последнего сообщения пользователя. Используй только приведённые локальные факты. Не выдумывай числа, калории или результаты, которых нет в facts."
+                messages: Array(history) + [current, prompt],
+                instructions: CoachPrompt.instructions,
+                tools: CoachToolDefinition.foodDiary,
+                onActivity: { [weak self] activity in await MainActor.run { self?.activity = activity } },
+                onTextUpdate: { [weak self] text in
+                    await MainActor.run {
+                        guard let index = self?.messages.firstIndex(where: { $0.id == pendingAssistantID }) else { return }
+                        self?.messages[index].text = text
+                    }
+                },
+                execute: { [localServices] call in
+                    await localServices.executeFoodTool(call, linkedChatMessageID: messageID, linkedAttachmentIDs: attachments.map(\.id))
+                }
             )
+            let answer = result.text
             guard !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ResponsesAPIError.incompleteStream }
-            try await localServices.appendChatMessage(ChatHistoryMessage(threadID: targetThread, role: .assistant, text: answer))
+            let assistantID = UUID()
+            let citations = result.citations.map { ChatCitation(messageID: assistantID, title: $0.title, url: $0.url) }
+            try await localServices.appendChatMessage(ChatHistoryMessage(id: assistantID, threadID: targetThread, role: .assistant, text: answer, citations: citations))
             threadID = targetThread
+            messages.removeAll { $0.id == pendingAssistantID }
+            streamingMessageID = nil
             messages.append(CoachMessage(
+                id: assistantID,
                 role: .assistant,
                 text: answer,
+                citations: citations,
                 recommendationCategory: "none",
                 feedbackContextID: nil
             ))
         } catch {
+            if let streamingMessageID { messages.removeAll { $0.id == streamingMessageID } }
             errorMessage = message(for: error)
         }
+        activity = nil
         isSending = false
+    }
+
+    func addImage(data: Data, mimeType: String) {
+        guard pendingImages.count < 5, let image = UIImage(data: data) else {
+            errorMessage = "Не удалось прочитать изображение."
+            return
+        }
+        pendingImages.append(.init(data: data, mimeType: mimeType, width: Int(image.size.width), height: Int(image.size.height)))
+    }
+
+    func removePendingImage(id: UUID) { pendingImages.removeAll { $0.id == id } }
+
+    private nonisolated static func persist(_ images: [PendingChatImage], messageID: UUID) throws -> (attachments: [ChatAttachment], transportData: [Data]) {
+        guard !images.isEmpty else { return ([], []) }
+        let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            .appendingPathComponent("Baseline/ChatAttachments", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var written: [URL] = []
+        do {
+            var transportData: [Data] = []
+            let attachments = try images.map { image in
+                let ext = UTType(mimeType: image.mimeType)?.preferredFilenameExtension ?? "bin"
+                let url = root.appendingPathComponent("\(UUID().uuidString).\(ext)")
+                try image.data.write(to: url, options: .atomic)
+                written.append(url)
+                guard let transport = transportJPEG(from: image.data) else { throw ChatAttachmentPreparationError.encodingFailed }
+                let transportURL = root.appendingPathComponent("\(UUID().uuidString)-transport.jpg")
+                try transport.write(to: transportURL, options: .atomic)
+                written.append(transportURL)
+                transportData.append(transport)
+                return ChatAttachment(messageID: messageID, localPath: url.path, transportPath: transportURL.path, mimeType: image.mimeType, width: image.width, height: image.height, byteSize: image.data.count)
+            }
+            return (attachments, transportData)
+        } catch {
+            for url in written { try? FileManager.default.removeItem(at: url) }
+            throw error
+        }
+    }
+
+    private nonisolated static func transportJPEG(from data: Data) -> Data? {
+        guard let image = UIImage(data: data) else { return nil }
+        let limit: CGFloat = 2_048
+        let scale = min(1, limit / max(image.size.width, image.size.height))
+        let size = CGSize(width: max(1, image.size.width * scale), height: max(1, image.size.height * scale))
+        let rendered = UIGraphicsImageRenderer(size: size).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+        return rendered.jpegData(compressionQuality: 0.82)
     }
 
     private func message(for error: Error) -> String {
@@ -174,6 +279,11 @@ final class ChatModel {
         catch { errorMessage = "Не удалось удалить провайдера." }
     }
 
+    func resetPersonalization() async {
+        do { try await localServices.resetPersonalization() }
+        catch { errorMessage = "Не удалось сбросить персонализацию." }
+    }
+
     func rate(messageID: UUID, useful: Bool) async {
         guard let index = messages.firstIndex(where: { $0.id == messageID }),
               messages[index].role == .assistant,
@@ -196,8 +306,11 @@ final class ChatModel {
 
 struct CoachScreen: View {
     @State private var model: ChatModel
-    @State private var showsHistory = false
     @State private var showsProviders = false
+    @State private var showsCamera = false
+    @State private var showsFoodDiary = false
+    @State private var selectedPhotos: [PhotosPickerItem] = []
+    @State private var previewAttachment: ChatAttachment?
     private let initialPrompt: String?
 
     init(
@@ -224,7 +337,7 @@ struct CoachScreen: View {
                             HStack(spacing: 9) {
                                 ProgressView()
                                     .controlSize(.small)
-                                Text("Анализирую данные тренировки…")
+                                Text(activityText)
                                     .font(.subheadline)
                                     .foregroundStyle(BaselineTheme.secondary)
                             }
@@ -255,27 +368,31 @@ struct CoachScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { showsHistory = true } label: { Image(systemName: "clock.arrow.circlepath") }
-                        .accessibilityLabel("История чатов")
-                }
-                ToolbarItem(placement: .principal) {
                     Menu {
-                        ForEach(model.providers) { provider in
-                            Button {
-                                Task { await model.selectProvider(provider) }
-                            } label: {
-                                Label(provider.name, systemImage: provider.id == model.selectedProviderID ? "checkmark" : "")
+                        if model.threads.isEmpty {
+                            Text("История пуста")
+                        } else {
+                            ForEach(Array(model.threads.prefix(8))) { thread in
+                                Button(thread.title) {
+                                    Task { await model.openChat(thread) }
+                                }
                             }
                         }
                         Divider()
-                        Button("Настройки провайдера") { showsProviders = true }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Text(model.providers.first(where: { $0.id == model.selectedProviderID })?.name ?? "Настроить Coach")
-                            Image(systemName: "chevron.down").font(.caption2)
+                        Button("Настроить API", systemImage: "key") {
+                            showsProviders = true
                         }
-                        .foregroundStyle(BaselineTheme.ink)
+                        Button("Рацион", systemImage: "fork.knife") {
+                            showsFoodDiary = true
+                        }
+                    } label: {
+                        Image(systemName: "line.3.horizontal")
                     }
+                    .accessibilityLabel("Диалоги и API")
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("Baseline")
+                        .font(.headline)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { model.startNewThread() } label: {
@@ -286,14 +403,42 @@ struct CoachScreen: View {
                 }
             }
             .safeAreaInset(edge: .bottom) { composer }
-            .sheet(isPresented: $showsHistory) { ChatHistoryView(model: model) }
             .sheet(isPresented: $showsProviders) { ProviderSettingsView(model: model) }
+            .sheet(isPresented: $showsFoodDiary) {
+                FoodDiaryView(localServices: model.localServices) { thread in Task { await model.openChat(thread) } }
+            }
+            .sheet(isPresented: $showsCamera) {
+                CameraImagePicker(isPresented: $showsCamera) { data, mimeType in model.addImage(data: data, mimeType: mimeType) }
+                    .ignoresSafeArea()
+            }
+            .fullScreenCover(item: $previewAttachment) { attachment in
+                NavigationStack {
+                    Group {
+                        LocalOriginalImage(path: attachment.localPath)
+                            .scaledToFit()
+                            .background(.black)
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) { Button("Закрыть") { previewAttachment = nil } }
+                    }
+                }
+            }
             .task {
                 await model.loadMostRecentThread()
                 if let initialPrompt, model.messages.isEmpty { await model.send(initialPrompt) }
             }
             .onChange(of: model.requiresProviderSettings) { _, value in
                 if value { showsProviders = true }
+            }
+            .onChange(of: selectedPhotos) { _, items in
+                guard !items.isEmpty else { return }
+                Task {
+                    for item in items {
+                        guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+                        model.addImage(data: data, mimeType: item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg")
+                    }
+                    selectedPhotos.removeAll()
+                }
             }
             .alert("Ошибка", isPresented: errorBinding) {
                 Button("Закрыть") { model.errorMessage = nil }
@@ -310,13 +455,20 @@ struct CoachScreen: View {
         )
     }
 
+    private var activityText: String {
+        switch model.activity {
+        case .analyzingImages: "Анализирую фотографии…"
+        case .searchingWeb: "Ищу пищевую ценность в интернете…"
+        case let .callingTool(name): name.contains("food") ? "Обновляю дневник питания…" : "Выполняю действие…"
+        case .streamingText: "Формирую ответ…"
+        case .thinking, nil: "Анализирую данные…"
+        }
+    }
+
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 18) {
             Spacer(minLength: 100)
             VStack(alignment: .leading, spacing: 10) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(BaselineTheme.accent)
                 Text("Что разбираем?")
                     .font(.system(size: 34, weight: .semibold, design: .rounded))
                 Text("Тренировка, восстановление или следующий шаг.")
@@ -328,7 +480,13 @@ struct CoachScreen: View {
                 Divider().overlay(BaselineTheme.border)
                 suggestionRow("Оцени восстановление")
                 Divider().overlay(BaselineTheme.border)
-                suggestionRow("Собери план на неделю")
+                suggestionRow("Что изменилось за неделю?")
+            }
+            if model.providers.isEmpty {
+                Button("Добавить API key") {
+                    showsProviders = true
+                }
+                .buttonStyle(.borderedProminent)
             }
             Spacer(minLength: 20)
         }
@@ -352,26 +510,42 @@ struct CoachScreen: View {
     @ViewBuilder
     private func messageRow(_ message: CoachMessage) -> some View {
         if message.role == .user {
-            Text(message.text)
-                .font(.body)
-                .textSelection(.enabled)
+            VStack(alignment: .trailing, spacing: 8) {
+                ForEach(message.attachments) { attachment in
+                    Button { previewAttachment = attachment } label: {
+                        LocalOriginalImage(path: attachment.localPath)
+                            .scaledToFit()
+                            .frame(maxWidth: 260, maxHeight: 300)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .accessibilityLabel("Открыть прикреплённое изображение")
+                }
+                if !message.text.isEmpty {
+                    Text(message.text)
+                        .font(.body)
+                        .textSelection(.enabled)
+                }
+            }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 11)
                 .background(BaselineTheme.accentSoft, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         } else {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(BaselineTheme.accent)
-                    .frame(width: 26, height: 26)
-                    .background(BaselineTheme.surface, in: Circle())
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(message.text)
-                        .font(.body)
-                        .lineSpacing(4)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 12) {
+                Text(message.text)
+                    .font(.body)
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if !message.citations.isEmpty {
+                    ForEach(message.citations) { citation in
+                        Link(destination: citation.url) {
+                            Label(citation.title ?? citation.url.host() ?? citation.url.absoluteString, systemImage: "link")
+                                .font(.caption)
+                                .lineLimit(1)
+                        }
+                    }
+                }
                 if message.recommendationCategory != nil,
                    message.recommendationCategory != "none" {
                     HStack(spacing: 10) {
@@ -381,8 +555,6 @@ struct CoachScreen: View {
                         ratingButton(systemName: "hand.thumbsup", value: 1, message: message)
                         ratingButton(systemName: "hand.thumbsdown", value: -1, message: message)
                     }
-                    .padding(.leading, 0)
-                }
                 }
             }
         }
@@ -404,23 +576,61 @@ struct CoachScreen: View {
 
     private var composer: some View {
         @Bindable var bindableModel = model
-        return HStack(alignment: .bottom, spacing: 10) {
-            TextField("Сообщение Baseline", text: $bindableModel.draft, axis: .vertical)
-                .lineLimit(1...6)
-                .submitLabel(.send)
-                .onSubmit { Task { await model.send() } }
-                .padding(.leading, 16)
-                .padding(.vertical, 13)
-            Button {
-                Task { await model.send() }
-            } label: {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(BaselineTheme.accent, in: Circle())
+        return VStack(alignment: .leading, spacing: 6) {
+            if !model.pendingImages.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(model.pendingImages) { pending in
+                            ZStack(alignment: .topTrailing) {
+                                if let image = UIImage(data: pending.data) {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 72, height: 72)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                }
+                                Button { model.removePendingImage(id: pending.id) } label: {
+                                    Image(systemName: "xmark.circle.fill").symbolRenderingMode(.palette).foregroundStyle(.white, .black.opacity(0.65))
+                                }
+                                .accessibilityLabel("Удалить изображение")
+                                .offset(x: 5, y: -5)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.top, 8)
+                }
+                .scrollIndicators(.hidden)
             }
-            .disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isSending)
+            HStack(alignment: .bottom, spacing: 10) {
+                Button { showsCamera = true } label: {
+                    Image(systemName: "camera")
+                        .frame(width: 30, height: 44)
+                }
+                .disabled(model.isSending || model.pendingImages.count >= 5 || !UIImagePickerController.isSourceTypeAvailable(.camera))
+                .accessibilityLabel("Сделать фотографию")
+                PhotosPicker(selection: $selectedPhotos, maxSelectionCount: max(0, 5 - model.pendingImages.count), matching: .images) {
+                    Image(systemName: "photo.on.rectangle")
+                        .frame(width: 36, height: 44)
+                }
+                .disabled(model.isSending || model.pendingImages.count >= 5)
+                .accessibilityLabel("Добавить фотографии")
+                TextField("Сообщение Baseline", text: $bindableModel.draft, axis: .vertical)
+                    .lineLimit(1...6)
+                    .submitLabel(.send)
+                    .onSubmit { Task { await model.send() } }
+                    .padding(.vertical, 13)
+                Button {
+                    Task { await model.send() }
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(BaselineTheme.accent, in: Circle())
+                }
+                .disabled((model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.pendingImages.isEmpty) || model.isSending)
+            }
         }
         .padding(6)
         .chatComposerSurface()
@@ -430,18 +640,58 @@ struct CoachScreen: View {
     }
 }
 
-private extension View {
-    @ViewBuilder
-    func chatComposerSurface() -> some View {
-        if #available(iOS 26.0, *) {
-            glassEffect(.regular.interactive(), in: .rect(cornerRadius: 28))
-        } else {
-            background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .stroke(BaselineTheme.border, lineWidth: 1)
-                }
+private struct LocalOriginalImage: View {
+    let path: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image { Image(uiImage: image).resizable() }
+            else { ProgressView().frame(minWidth: 80, minHeight: 80) }
         }
+        .task(id: path) {
+            let data = await Task.detached(priority: .userInitiated) { try? Data(contentsOf: URL(fileURLWithPath: path)) }.value
+            image = data.flatMap(UIImage.init)
+        }
+    }
+}
+
+private struct CameraImagePicker: UIViewControllerRepresentable {
+    @Binding var isPresented: Bool
+    let onImage: (Data, String) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(isPresented: $isPresented, onImage: onImage) }
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onImage: (Data, String) -> Void
+        @Binding var isPresented: Bool
+        init(isPresented: Binding<Bool>, onImage: @escaping (Data, String) -> Void) { _isPresented = isPresented; self.onImage = onImage }
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            defer { isPresented = false }
+            if let url = info[.imageURL] as? URL, let data = try? Data(contentsOf: url) {
+                onImage(data, UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "image/jpeg")
+            } else if let image = info[.originalImage] as? UIImage, let data = image.jpegData(compressionQuality: 1) {
+                onImage(data, "image/jpeg")
+            }
+        }
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { isPresented = false }
+    }
+}
+
+private extension View {
+    func chatComposerSurface() -> some View {
+        background(BaselineTheme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(BaselineTheme.border, lineWidth: 1)
+            }
     }
 }
 

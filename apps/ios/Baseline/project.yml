@@ -15,6 +15,9 @@ targets:
       Release: Config/Signing.xcconfig
     sources:
       - path: Sources
+        excludes:
+          - ChatHistoryView.swift
+          - FoundationModelsCoach.swift
       - path: Resources
         optional: true
         buildPhase: resources
