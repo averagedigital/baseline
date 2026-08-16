@@ -1,46 +1,45 @@
 import SwiftUI
 
 struct AppShell: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var model = CameraModel()
-    @State private var showsCoach = false
-    @State private var showsSettings = false
-    @State private var coachPrompt: String?
 
     var body: some View {
         @Bindable var bindableModel = model
 
-        NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    header
-                    CameraCard(model: model)
-                    LatestFoodCard(model: model)
-                    HomeInsightCard(model: model) {
-                        coachPrompt = nil
-                        showsCoach = true
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-                .padding(.bottom, 32)
+        TabView {
+            NavigationStack {
+                CameraCard(model: model)
+                    .padding(16)
+                    .baselinePage()
+                    .navigationTitle("Камера")
+                    .navigationBarTitleDisplayMode(.inline)
             }
-            .scrollIndicators(.hidden)
-            .refreshable { await model.refreshHome() }
-            .baselinePage()
-            .toolbar(.hidden, for: .navigationBar)
+            .tabItem { Label("Камера", systemImage: "camera.fill") }
+
+            CoachScreen(localServices: model.localServices)
+                .tabItem { Label("Coach", systemImage: "sparkles") }
         }
+        .tint(BaselineTheme.accent)
         .task {
             await model.startCamera()
-            await model.refreshHome()
+            model.startWorkout()
         }
-        .sheet(isPresented: $showsCoach) {
-            CoachScreen(
-                localServices: model.localServices,
-                initialPrompt: coachPrompt
-            )
-        }
-        .sheet(isPresented: $showsSettings) {
-            SettingsSheet(model: model)
+        .onChange(of: scenePhase) { _, phase in
+            Task { @MainActor in
+                switch phase {
+                case .active:
+                    await model.startCamera()
+                    model.startWorkout()
+                case .background:
+                    await model.stopWorkout()
+                    model.stopCamera()
+                case .inactive:
+                    break
+                @unknown default:
+                    break
+                }
+            }
         }
         .sheet(item: $bindableModel.pendingFeedback) { feedback in
             SessionFeedbackSheet(feedback: feedback) { value, note in
@@ -53,30 +52,6 @@ struct AppShell: View {
             Button("Закрыть") { model.errorMessage = nil }
         } message: {
             Text(model.errorMessage ?? "Неизвестная ошибка")
-        }
-    }
-
-    private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Baseline")
-                    .font(.system(size: 29, weight: .bold, design: .rounded))
-                Text("Тренировка, движение и питание")
-                    .font(.caption)
-                    .foregroundStyle(BaselineTheme.secondary)
-            }
-            Spacer()
-            Button {
-                showsSettings = true
-            } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(BaselineTheme.ink)
-                    .frame(width: 42, height: 42)
-                    .background(BaselineTheme.surface, in: Circle())
-                    .overlay { Circle().stroke(BaselineTheme.border, lineWidth: 1) }
-            }
-            .accessibilityLabel("Настройки")
         }
     }
 
@@ -170,51 +145,6 @@ private struct SessionFeedbackSheet: View {
             .baselinePage()
             .navigationTitle("После тренировки")
             .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-}
-
-private struct SettingsSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    let model: CameraModel
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Камера") {
-                    Toggle(
-                        "Автоматически определять еду",
-                        isOn: Binding(
-                            get: { model.foodScanEnabled },
-                            set: { model.setFoodScanEnabled($0) }
-                        )
-                    )
-                    Button("Сбросить фиксацию спортсмена") {
-                        model.resetSubjectLock()
-                    }
-                }
-
-                Section("Приватность") {
-                    Label("Видео не записывается", systemImage: "video.slash")
-                    Label("Session evidence хранится локально", systemImage: "waveform.path.ecg")
-                    Label("Изображения камеры обрабатываются только в памяти и не сохраняются", systemImage: "fork.knife")
-                }
-
-                Section("Архитектура") {
-                    Text("На устройстве: камера, фиксация человека, realtime-метрики, контекст, Coach и персонализация.")
-                        .font(.footnote)
-                        .foregroundStyle(BaselineTheme.secondary)
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .baselinePage()
-            .navigationTitle("Настройки")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Готово") { dismiss() }
-                }
-            }
         }
     }
 }

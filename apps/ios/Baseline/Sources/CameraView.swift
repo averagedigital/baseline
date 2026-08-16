@@ -573,23 +573,17 @@ struct CameraCard: View {
                 }
             }
 
-            Button {
-                Task {
-                    if model.isWorkoutRecording {
-                        await model.stopWorkout()
-                    } else {
-                        model.startWorkout()
-                    }
-                }
-            } label: {
-                HStack {
-                    Image(systemName: model.isWorkoutRecording ? "stop.fill" : "play.fill")
-                    Text(model.isWorkoutRecording
-                        ? "Завершить · \(duration(model.recordingElapsed))"
-                        : "Начать тренировку")
-                }
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(BaselineTheme.success)
+                    .frame(width: 8, height: 8)
+                Text(model.isWorkoutRecording
+                    ? "Запись · \(duration(model.recordingElapsed))"
+                    : "Подготовка записи")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(BaselineTheme.secondary)
+                Spacer()
             }
-            .buttonStyle(BaselinePrimaryButtonStyle())
         }
     }
 
