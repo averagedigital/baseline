@@ -7,8 +7,19 @@ struct ResponsesInputMessage: Codable, Equatable, Sendable {
     let content: String
 }
 
-enum ResponsesAPIError: Error, Equatable, Sendable {
+enum ResponsesAPIError: Error, Equatable, Sendable, LocalizedError {
     case invalidBaseURL, invalidHTTPResponse, httpStatus(Int), remote(String), malformedEvent, incompleteStream
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidBaseURL: "Некорректный Base URL провайдера. Ожидается адрес вида https://.../v1."
+        case .invalidHTTPResponse: "Провайдер вернул некорректный HTTP-ответ."
+        case let .httpStatus(code): "Cloud API вернул HTTP \(code). Проверьте Base URL, модель и API key."
+        case let .remote(message): message
+        case .malformedEvent: "Cloud API вернул неподдерживаемый формат ответа."
+        case .incompleteStream: "Cloud API оборвал поток ответа или не вернул текст."
+        }
+    }
 }
 
 struct ResponsesAPIClient: Sendable {

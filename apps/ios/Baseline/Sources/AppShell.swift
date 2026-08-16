@@ -9,9 +9,7 @@ struct AppShell: View {
         @Bindable var bindableModel = model
 
         TabView(selection: $selectedTab) {
-            NavigationStack {
-                CameraScreen(model: model)
-            }
+            CameraScreen(model: model)
             .tag(AppTab.camera)
             .tabItem { Label("Камера", systemImage: "camera.fill") }
 
