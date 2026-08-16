@@ -312,9 +312,18 @@ actor LocalDeviceServices {
             facts.append(.boolean("food:\(food.id.uuidString):portion_available", food.items.contains { $0.estimatedGrams != nil || ($0.gramsLow != nil && $0.gramsHigh != nil) }, sourceFoodObservationID: food.id))
             if let low = food.caloriesLow, let high = food.caloriesHigh { facts += [.number("food:\(food.id.uuidString):kcal_low", low, sourceFoodObservationID: food.id), .number("food:\(food.id.uuidString):kcal_high", high, sourceFoodObservationID: food.id)] }
         }
-        let state = try await store.loadPersonalizationState(as: PersonalizationState.self) ?? PersonalizationState()
+        let state: PersonalizationState
+        do {
+            state = try await store.loadPersonalizationState(as: PersonalizationState.self) ?? PersonalizationState()
+        } catch {
+            // A legacy or partially written personalization snapshot must not block Coach context.
+            state = PersonalizationState()
+        }
         facts += [.number("personalization:difficulty_sample_count", Double(state.difficulty.samples)), .number("personalization:difficulty_confidence", state.difficulty.dataConfidence), .number("personalization:explicit_reward_count", Double(state.bandit.totalExplicitRewards)), .boolean("personalization:recommendation_personalized", state.bandit.totalExplicitRewards >= 5)]
-        if let prediction = state.difficulty.predict(features: try await PersonalizationFeatureBuilder(store: store).features(for: envelope.id)) { facts.append(.number("personalization:predicted_difficulty", prediction)) }
+        if let features = try? await PersonalizationFeatureBuilder(store: store).features(for: envelope.id),
+           let prediction = state.difficulty.predict(features: features) {
+            facts.append(.number("personalization:predicted_difficulty", prediction))
+        }
         assert(Set(facts.map(\.id)).count == facts.count)
         return facts
     }

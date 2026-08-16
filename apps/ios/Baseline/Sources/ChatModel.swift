@@ -136,9 +136,15 @@ final class ChatModel {
                 feedbackContextID: nil
             ))
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = message(for: error)
         }
         isSending = false
+    }
+
+    private func message(for error: Error) -> String {
+        if let error = error as? ResponsesAPIError { return error.localizedDescription }
+        if error is DecodingError { return "Локальные данные Baseline имеют старый или неполный формат. Запрос Coach не отправлен." }
+        return error.localizedDescription
     }
 
     private func ensureThread(title: String) async throws -> UUID {
