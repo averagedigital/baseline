@@ -8,7 +8,8 @@ struct ResponsesInputMessage: Equatable, Sendable {
     let imageDataURLs: [String]
     init(role: Role, content: String, imageDataURLs: [String] = []) { self.role = role; text = content; self.imageDataURLs = imageDataURLs }
     var dictionary: [String: Any] {
-        var content: [[String: Any]] = text.isEmpty ? [] : [["type": "input_text", "text": text]]
+        let textType = role == .user ? "input_text" : "output_text"
+        var content: [[String: Any]] = text.isEmpty ? [] : [["type": textType, "text": text]]
         content += imageDataURLs.map { ["type": "input_image", "image_url": $0, "detail": "auto"] }
         return ["role": role.rawValue, "content": content]
     }
@@ -113,7 +114,16 @@ struct URLSessionResponsesEventTransport: ResponsesEventTransport {
     func streamEvents(for request: URLRequest, onEvent: @escaping (String) async throws -> Void) async throws {
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
         guard let http = response as? HTTPURLResponse else { throw ResponsesAPIError.invalidHTTPResponse }
-        guard 200..<300 ~= http.statusCode else { throw ResponsesAPIError.httpStatus(http.statusCode) }
+        guard 200..<300 ~= http.statusCode else {
+            var data = Data()
+            for try await byte in bytes { data.append(byte) }
+            if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let error = object["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                throw ResponsesAPIError.remote(message)
+            }
+            throw ResponsesAPIError.httpStatus(http.statusCode)
+        }
         for try await line in bytes.lines where line.hasPrefix("data:") {
             let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
             if payload == "[DONE]" { break }

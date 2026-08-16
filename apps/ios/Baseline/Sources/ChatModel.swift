@@ -77,8 +77,13 @@ final class ChatModel {
 
     func loadMostRecentThread() async {
         do {
-            providers = try await localServices.providerConfigurations()
-            selectedProviderID = providers.first(where: \.isSelected)?.id ?? providers.first?.id
+            let storedProviders = try await localServices.providerConfigurations()
+            if let stored = storedProviders.first(where: \.isSelected) ?? storedProviders.first {
+                let openAI = OpenAIProvider.normalize(stored)
+                if openAI != stored { try await localServices.saveProviderConfiguration(openAI) }
+                providers = [openAI]
+                selectedProviderID = openAI.id
+            }
             threads = try await localServices.chatThreads()
             if messages.isEmpty, let (thread, history) = try await localServices.mostRecentChat() {
                 load(thread: thread, history: history)
@@ -261,10 +266,11 @@ final class ChatModel {
 
     func saveProvider(_ provider: ProviderConfiguration, apiKey: String) async {
         do {
-            try await localServices.saveProviderConfiguration(provider)
-            try keyStore.save(apiKey, providerID: provider.id)
-            providers = try await localServices.providerConfigurations()
-            selectedProviderID = provider.id
+            let openAI = OpenAIProvider.normalize(provider)
+            try await localServices.saveProviderConfiguration(openAI)
+            if !apiKey.isEmpty { try keyStore.save(apiKey, providerID: openAI.id) }
+            providers = [openAI]
+            selectedProviderID = openAI.id
             requiresProviderSettings = false
         } catch { errorMessage = "Не удалось сохранить настройки провайдера." }
     }
@@ -515,7 +521,7 @@ struct CoachScreen: View {
                     Button { previewAttachment = attachment } label: {
                         LocalOriginalImage(path: attachment.localPath)
                             .scaledToFit()
-                            .frame(maxWidth: 260, maxHeight: 300)
+                            .frame(maxWidth: 340, maxHeight: 420)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .accessibilityLabel("Открыть прикреплённое изображение")
@@ -532,11 +538,7 @@ struct CoachScreen: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
         } else {
             VStack(alignment: .leading, spacing: 12) {
-                Text(message.text)
-                    .font(.body)
-                    .lineSpacing(4)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                CoachMarkdownView(markdown: message.text)
                 if !message.citations.isEmpty {
                     ForEach(message.citations) { citation in
                         Link(destination: citation.url) {

@@ -3,6 +3,38 @@ import XCTest
 @testable import Baseline
 
 final class ResponsesAPIClientTests: XCTestCase {
+    func testOpenAIProviderCatalogAndLegacyNormalization() {
+        XCTAssertEqual(OpenAIProvider.models.map(\.rawValue), [
+            "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+            "gpt-5.5", "gpt-5.5-pro",
+            "gpt-5.4", "gpt-5.4-pro", "gpt-5.4-mini", "gpt-5.4-nano",
+        ])
+
+        let legacy = ProviderConfiguration(
+            name: "OpenAI",
+            baseURL: "https://api.openai.com/v1",
+            model: "Luna",
+            isSelected: true
+        )
+        let normalized = OpenAIProvider.normalize(legacy)
+
+        XCTAssertEqual(normalized.id, legacy.id)
+        XCTAssertEqual(normalized.name, "OpenAI")
+        XCTAssertEqual(normalized.baseURL, "https://api.openai.com/v1")
+        XCTAssertEqual(normalized.model, "gpt-5.6-sol")
+        XCTAssertEqual(normalized.capabilities, .openAI)
+        XCTAssertTrue(normalized.webSearchEnabled)
+        XCTAssertEqual(OpenAIProvider.Model.gpt55Pro.reasoningEfforts, [.medium, .high, .xhigh])
+        XCTAssertEqual(OpenAIProvider.Model.gpt56Luna.reasoningEfforts, [.off, .low, .medium, .high, .xhigh, .max])
+    }
+
+    func testCoachUsesApprovedVersionedPromptResource() {
+        XCTAssertEqual(CoachPrompt.version, "coach-v3")
+        XCTAssertTrue(CoachPrompt.instructions.hasPrefix("# Baseline Coach\n"))
+        XCTAssertTrue(CoachPrompt.instructions.contains("{{verified_local_facts}}"))
+        XCTAssertTrue(CoachPrompt.instructions.hasSuffix("</runtime_context>\n"))
+    }
+
     func testRequestIncludesOnlySupportedCapabilities() throws {
         let provider = ProviderConfiguration(name: "OpenAI", baseURL: "https://api.openai.com/v1", model: "gpt-5.4", capabilities: .openAI, webSearchEnabled: true, reasoningEffort: .high)
         let payload = ResponsesAPIClient.requestPayload(provider: provider, input: [["role": "user", "content": [["type": "input_text", "text": "Обед"]]]], tools: [CoachToolDefinition.createFoodEntry.dictionary], previousResponseID: nil)
@@ -38,6 +70,12 @@ final class ResponsesAPIClientTests: XCTestCase {
         let message = ResponsesInputMessage(role: .user, content: "Ужин", imageDataURLs: ["data:image/jpeg;base64,AA==", "data:image/png;base64,AA=="])
         let content = try XCTUnwrap(message.dictionary["content"] as? [[String: Any]])
         XCTAssertEqual(content.compactMap { $0["type"] as? String }, ["input_text", "input_image", "input_image"])
+    }
+
+    func testAssistantHistoryUsesOutputText() throws {
+        let message = ResponsesInputMessage(role: .assistant, content: "123.")
+        let content = try XCTUnwrap(message.dictionary["content"] as? [[String: Any]])
+        XCTAssertEqual(content.first?["type"] as? String, "output_text")
     }
 
     func testEventParserStreamsTextAndCompletes() throws {

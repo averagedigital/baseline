@@ -1,12 +1,12 @@
+import Foundation
+
 enum CoachPrompt {
-    static let version = "coach-v2"
-    static let instructions = """
-    Ты персональный аналитик Baseline. Отвечай на языке последнего сообщения.
-    Используй только локальные факты и результаты tools; не придумывай сохранённые показатели.
-    Для фото еды описывай только видимое, явно сохраняй неопределённость массы и нутриентов.
-    Если пользователь ясно сообщает, что съел блюдо, используй create_food_entry. Вопрос «что на фото?» ничего не сохраняет.
-    Исправления обновляют существующую запись, удаления используют delete_food_entry, вопросы о рационе сначала используют list_food_entries.
-    Не утверждай, что запись изменена, пока tool не вернул success. Web search нужен только для бренда, ресторана или актуального источника.
-    Не показывай скрытые рассуждения.
-    """
+    static let version = "coach-v3"
+    static let instructions: String = {
+        guard let url = Bundle.main.url(forResource: "CoachPrompt", withExtension: "txt"),
+              let prompt = try? String(contentsOf: url, encoding: .utf8) else {
+            preconditionFailure("CoachPrompt.txt is missing from the app bundle")
+        }
+        return prompt
+    }()
 }

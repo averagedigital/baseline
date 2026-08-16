@@ -15,7 +15,9 @@
 		2788367BE0D28844B09A5DB2 /* AthleteSensors in Frameworks */ = {isa = PBXBuildFile; productRef = DE8D28D7B1A50EC05F427F31 /* AthleteSensors */; };
 		2B94BFF588088C598345B52D /* FoodDetector.mlmodel in Resources */ = {isa = PBXBuildFile; fileRef = AFE7F28DC10BE9123ED159D1 /* FoodDetector.mlmodel */; };
 		3269353CAD06E097F5DE480B /* APIKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9AF535E570C28F824210716 /* APIKeyStore.swift */; };
+		43B3112CA586A99788835663 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 955BF50DF9B3EAE3328AC3BB /* MarkdownUI */; };
 		4831FEAE90CB66F844863B75 /* AppShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444EFEC840B90D25B3246576 /* AppShell.swift */; };
+		4E4DCAB52112F4A41842DAD5 /* CoachPrompt.txt in Resources */ = {isa = PBXBuildFile; fileRef = 0790B2E93CAB286523FE99B3 /* CoachPrompt.txt */; };
 		5DA49EC8D1D80B052CABBBC8 /* AthleteNutrition in Frameworks */ = {isa = PBXBuildFile; productRef = 27301A2025CD460E49D7B4B0 /* AthleteNutrition */; };
 		5E2500A7AA535F36F14F751C /* ResponsesAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 609DE69CACEE0D6A552DC0E9 /* ResponsesAPIClient.swift */; };
 		603F55226DB7422C69381DEF /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E55114F9CEDE340C6BD68CA /* CameraView.swift */; };
@@ -24,6 +26,7 @@
 		63F3D05826411592747223D9 /* FoodDetectionOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68DDD440562B5D1CF2B1D2AE /* FoodDetectionOverlay.swift */; };
 		680C9E7216E051775620E86F /* BaselineApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DC4E9AA70B1E388336CD0ED /* BaselineApp.swift */; };
 		867C3AD465C30C1CC0ABBC63 /* ProviderSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AE15BA9C31AB7CD2EBEB393 /* ProviderSettingsViews.swift */; };
+		86F61762DEDE8DC62C7D4DAD /* CoachMarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6882089639F205F59B207839 /* CoachMarkdownView.swift */; };
 		89F4ECD03AD37EE47426CFC8 /* AthletePersonalization in Frameworks */ = {isa = PBXBuildFile; productRef = EC1E8B6B62284BC14AB578D9 /* AthletePersonalization */; };
 		AABC4506BBF2F7838205D772 /* WorkoutCaptureQualityAccumulator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09879D0DDCBAF67B5ED0F9F8 /* WorkoutCaptureQualityAccumulator.swift */; };
 		AE7E7EAE2835D3918930C678 /* .gitkeep in Resources */ = {isa = PBXBuildFile; fileRef = DB57CD73831BF28227615D0A /* .gitkeep */; };
@@ -52,6 +55,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0790B2E93CAB286523FE99B3 /* CoachPrompt.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = CoachPrompt.txt; sourceTree = "<group>"; };
 		09879D0DDCBAF67B5ED0F9F8 /* WorkoutCaptureQualityAccumulator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutCaptureQualityAccumulator.swift; sourceTree = "<group>"; };
 		107DE3C058E79682566EDD74 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		16F83EDBAF598A7224A2DE0A /* LocalDeviceServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalDeviceServices.swift; sourceTree = "<group>"; };
@@ -63,6 +67,7 @@
 		4A7838FE09CC06FD091D9A4C /* SampleDashboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleDashboardTests.swift; sourceTree = "<group>"; };
 		5B0C52D1A3CE1CCCDBE2A430 /* PersonalizationFeatureBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalizationFeatureBuilder.swift; sourceTree = "<group>"; };
 		609DE69CACEE0D6A552DC0E9 /* ResponsesAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponsesAPIClient.swift; sourceTree = "<group>"; };
+		6882089639F205F59B207839 /* CoachMarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMarkdownView.swift; sourceTree = "<group>"; };
 		68DDD440562B5D1CF2B1D2AE /* FoodDetectionOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodDetectionOverlay.swift; sourceTree = "<group>"; };
 		6E55114F9CEDE340C6BD68CA /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
 		8DC4E9AA70B1E388336CD0ED /* BaselineApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BaselineApp.swift; sourceTree = "<group>"; };
@@ -95,6 +100,7 @@
 				5DA49EC8D1D80B052CABBBC8 /* AthleteNutrition in Frameworks */,
 				89F4ECD03AD37EE47426CFC8 /* AthletePersonalization in Frameworks */,
 				F67AC21768C39A6757F22E28 /* AthleteIntelligence in Frameworks */,
+				43B3112CA586A99788835663 /* MarkdownUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -113,6 +119,7 @@
 				BA264C8FAA0DD1EB9D630084 /* CameraPipeline.swift */,
 				6E55114F9CEDE340C6BD68CA /* CameraView.swift */,
 				93106080A48EEB56C6A64DAF /* ChatModel.swift */,
+				6882089639F205F59B207839 /* CoachMarkdownView.swift */,
 				DD6D56A82F2E5E97ED4770FE /* CoachPrompt.swift */,
 				68DDD440562B5D1CF2B1D2AE /* FoodDetectionOverlay.swift */,
 				D8C9A5216766F660EC010BDC /* FoodDiaryView.swift */,
@@ -178,6 +185,7 @@
 			isa = PBXGroup;
 			children = (
 				DB57CD73831BF28227615D0A /* .gitkeep */,
+				0790B2E93CAB286523FE99B3 /* CoachPrompt.txt */,
 				AFE7F28DC10BE9123ED159D1 /* FoodDetector.mlmodel */,
 				3DAF13D47A625744756C4067 /* nutrition.sqlite */,
 				3C56094B3402BA454F7494D9 /* README.md */,
@@ -208,6 +216,7 @@
 				27301A2025CD460E49D7B4B0 /* AthleteNutrition */,
 				EC1E8B6B62284BC14AB578D9 /* AthletePersonalization */,
 				E4A021A31E67C469449A7D1C /* AthleteIntelligence */,
+				955BF50DF9B3EAE3328AC3BB /* MarkdownUI */,
 			);
 			productName = Baseline;
 			productReference = 917EC6C734FA7FDEF274FFAD /* Baseline.app */;
@@ -251,6 +260,7 @@
 			mainGroup = 509392B522DBD54B11ECE0AB;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				8EE8CD9895AA4C30EB326118 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				F83B07DBFD498864321E7312 /* XCLocalSwiftPackageReference "../../../packages/swift" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -269,6 +279,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AE7E7EAE2835D3918930C678 /* .gitkeep in Resources */,
+				4E4DCAB52112F4A41842DAD5 /* CoachPrompt.txt in Resources */,
 				2B94BFF588088C598345B52D /* FoodDetector.mlmodel in Resources */,
 				05A1943E3664F8948CF35499 /* README.md in Resources */,
 				61F1F2D3C08A3F47F7494763 /* nutrition.sqlite in Resources */,
@@ -300,6 +311,7 @@
 				C8785DD2C4810B8B74E2A659 /* CameraPipeline.swift in Sources */,
 				603F55226DB7422C69381DEF /* CameraView.swift in Sources */,
 				BCE0B0A08B6A521F298EE7CA /* ChatModel.swift in Sources */,
+				86F61762DEDE8DC62C7D4DAD /* CoachMarkdownView.swift in Sources */,
 				154D9BC9C4657BE28AC8E168 /* CoachPrompt.swift in Sources */,
 				63F3D05826411592747223D9 /* FoodDetectionOverlay.swift in Sources */,
 				0DA05C121635271D91F37CBC /* FoodDiaryView.swift in Sources */,
@@ -388,7 +400,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -450,7 +462,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -569,6 +581,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		8EE8CD9895AA4C30EB326118 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		27301A2025CD460E49D7B4B0 /* AthleteNutrition */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -581,6 +604,11 @@
 		8DE0616B042A85FE7638C35F /* AthleteStore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AthleteStore;
+		};
+		955BF50DF9B3EAE3328AC3BB /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8EE8CD9895AA4C30EB326118 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
 		};
 		DE8D28D7B1A50EC05F427F31 /* AthleteSensors */ = {
 			isa = XCSwiftPackageProductDependency;

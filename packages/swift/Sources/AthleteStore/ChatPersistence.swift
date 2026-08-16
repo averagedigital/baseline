@@ -106,7 +106,7 @@ public struct ProviderCapabilities: Codable, Equatable, Sendable {
     }
 }
 
-public enum ProviderReasoningEffort: String, Codable, Equatable, Sendable, CaseIterable { case off, low, medium, high }
+public enum ProviderReasoningEffort: String, Codable, Equatable, Sendable, CaseIterable { case off, low, medium, high, xhigh, max }
 
 public struct ProviderConfiguration: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID

@@ -1,5 +1,6 @@
 import CoreML
 import Foundation
+import SwiftUI
 import Testing
 import AthleteCore
 import AthleteNutrition
@@ -30,6 +31,106 @@ func togglesCameraPosition() {
 @Test("Продукт имеет ровно две основные вкладки")
 func hasExactlyTwoProductTabs() {
     #expect(AppTab.allCases == [.camera, .chat])
+}
+
+@MainActor
+@Test("Свободный Markdown-ответ Coach рендерится нативным SwiftUI view")
+func rendersCoachMarkdownResponse() throws {
+    let renderer = ImageRenderer(
+        content: CoachMarkdownView(
+            markdown: """
+            ## Итог
+
+            - **Темп:** ровный
+            - Восстановление достаточное
+
+            - [x] Пульс проверен
+
+            | Метрика | Значение |
+            | --- | ---: |
+            | Сон | 8 ч |
+
+            > Продолжай в том же духе.
+            """
+        )
+        .frame(width: 320)
+    )
+
+    let image = try #require(renderer.uiImage)
+    #expect(image.size.width > 0)
+    #expect(image.size.height > 0)
+}
+
+@MainActor
+@Test("Markdown Coach не рисует лист под обычным текстом")
+func keepsCoachMarkdownBackgroundTransparent() throws {
+    let renderer = ImageRenderer(
+        content: CoachMarkdownView(markdown: "Обычный текст")
+            .frame(width: 320, height: 60)
+            .background(Color(red: 1, green: 0, blue: 1))
+    )
+    renderer.scale = 1
+
+    let image = try #require(renderer.uiImage?.cgImage)
+    var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+    let context = try #require(
+        CGContext(
+            data: &pixels,
+            width: image.width,
+            height: image.height,
+            bitsPerComponent: 8,
+            bytesPerRow: image.width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+    )
+    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+
+    var magentaPixels = 0
+    for index in stride(from: 0, to: pixels.count, by: 4) {
+        if pixels[index] > 200 && pixels[index + 1] < 40 && pixels[index + 2] > 200 {
+            magentaPixels += 1
+        }
+    }
+    #expect(Double(magentaPixels) / Double(image.width * image.height) > 0.9)
+}
+
+@MainActor
+@Test("Заголовок Coach использует многоцветную типографику iOS 18")
+func rendersCoachHeadingWithMultipleColors() throws {
+    let renderer = ImageRenderer(
+        content: CoachMarkdownView(markdown: "# Разбор тренировки")
+            .frame(width: 320, height: 80)
+            .background(Color.white)
+    )
+    renderer.scale = 1
+
+    let image = try #require(renderer.uiImage?.cgImage)
+    var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+    let context = try #require(
+        CGContext(
+            data: &pixels,
+            width: image.width,
+            height: image.height,
+            bitsPerComponent: 8,
+            bytesPerRow: image.width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+    )
+    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+
+    var bluePixels = 0
+    var warmPixels = 0
+    for index in stride(from: 0, to: pixels.count, by: 4) {
+        let red = Int(pixels[index])
+        let green = Int(pixels[index + 1])
+        let blue = Int(pixels[index + 2])
+        if blue > red + 20 && blue > green + 20 { bluePixels += 1 }
+        if red > blue + 20 && red > green + 20 { warmPixels += 1 }
+    }
+    #expect(bluePixels > 0)
+    #expect(warmPixels > 0)
 }
 
 @MainActor
