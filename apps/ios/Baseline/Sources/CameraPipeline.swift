@@ -29,6 +29,7 @@ final class CameraPipeline: NSObject, @unchecked Sendable {
     var onFoodCandidate: (@Sendable ([FoodDetection], Date) -> Void)?
     var onFoodObjects: (@Sendable (FoodFrameResult) -> Void)?
     var onFoodAvailability: (@Sendable (FoodObjectDetector.Availability) -> Void)?
+    var onIdentitySample: (@Sendable ([Double], Double) -> Void)?
     var onError: (@Sendable (String) -> Void)?
 
     private let queue = DispatchQueue(label: "org.averagedigital.baseline.camera", qos: .userInitiated)
@@ -51,6 +52,9 @@ final class CameraPipeline: NSObject, @unchecked Sendable {
     private var foodDetectionInFlight = false
     private var foodTracker = FoodDetectionTracker()
     private var foodAvailabilityPublished = false
+    private var pendingSubjectLockPoint: CGPoint?
+    private var subjectIsUserLocked = false
+    private var lastIdentitySampleAt: TimeInterval = -.infinity
 
     func start() async throws {
         try await withCheckedThrowingContinuation { continuation in
@@ -83,7 +87,11 @@ final class CameraPipeline: NSObject, @unchecked Sendable {
     }
 
     func resetSubjectLock() {
-        queue.async { [self] in resetTrackingState() }
+        queue.async { [self] in subjectIsUserLocked = false; resetTrackingState() }
+    }
+
+    func lockSubject(at point: CGPoint) {
+        queue.async { [self] in pendingSubjectLockPoint = point }
     }
 
     func switchCamera(to position: CaptureCameraPosition) async throws {
@@ -195,8 +203,22 @@ extension CameraPipeline: AVCaptureVideoDataOutputSampleBufferDelegate {
             try VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
                 .perform([bodyRequest])
             let candidates = try (bodyRequest.results ?? []).compactMap { try makeCandidate($0, pixelBuffer: pixelBuffer) }
-            let result = tracker.update(candidates: candidates)
             let geometry = CameraGeometry(isMirrored: cameraPosition == .front)
+            if let point = pendingSubjectLockPoint {
+                pendingSubjectLockPoint = nil
+                if let candidate = candidates.filter({ geometry.displayRect(for: $0.boundingBox).contains(point) }).max(by: { $0.averageConfidence < $1.averageConfidence }) {
+                    tracker.lock(candidate: candidate)
+                    subjectIsUserLocked = true
+                    lastIdentitySampleAt = -.infinity
+                }
+            }
+            let result = tracker.update(candidates: candidates)
+            if subjectIsUserLocked, result.isMetricEligible, timestamp - lastIdentitySampleAt >= 2,
+               let candidate = result.candidate, candidate.averageConfidence >= 0.8,
+               let signature = candidate.appearanceSignature {
+                lastIdentitySampleAt = timestamp
+                onIdentitySample?(signature.values.map(Double.init), candidate.averageConfidence)
+            }
 
             var displaySamples: [PoseSample] = []
             var displayBox: NormalizedPoseRect?
@@ -253,15 +275,23 @@ extension CameraPipeline: AVCaptureVideoDataOutputSampleBufferDelegate {
                 guard let self else { return }
                 self.foodDetectionInFlight = false
                 let tracked = self.foodTracker.update(detections, at: timestamp)
+                let foodDetections = FoodLabelPolicy.analysisDetections(tracked.map {
+                    FoodDetection(id: $0.id, label: $0.label, confidence: $0.confidence, boundingBox: $0.boundingBox)
+                })
                 if !self.foodAvailabilityPublished {
                     self.foodAvailabilityPublished = true
                     self.onFoodAvailability?(self.foodDetector.availability)
                 }
-                self.onFoodObjects?(FoodFrameResult(objects: tracked, sourceSize: CGSize(width: CVPixelBufferGetWidth(box.value), height: CVPixelBufferGetHeight(box.value)), timestamp: timestamp))
-                guard self.foodScanEnabled, self.foodGate.consume(observations: tracked.map { FoodDetection(id: $0.id, label: $0.label, confidence: $0.confidence, boundingBox: $0.boundingBox) }, at: timestamp) else {
+#if DEBUG
+                let displayed = tracked
+#else
+                let displayed = tracked.filter { FoodLabelPolicy.isSupported($0.label) }
+#endif
+                self.onFoodObjects?(FoodFrameResult(objects: displayed, sourceSize: CGSize(width: CVPixelBufferGetWidth(box.value), height: CVPixelBufferGetHeight(box.value)), timestamp: timestamp))
+                guard self.foodScanEnabled, self.foodGate.consume(observations: foodDetections, at: timestamp) else {
                     return
                 }
-                self.onFoodCandidate?(tracked.map { FoodDetection(id: $0.id, label: $0.label, confidence: $0.confidence, boundingBox: $0.boundingBox) }, Date())
+                self.onFoodCandidate?(foodDetections, Date())
             }
         }
     }
@@ -296,6 +326,11 @@ extension CameraPipeline: AVCaptureVideoDataOutputSampleBufferDelegate {
     }
 }
 
+private extension NormalizedPoseRect {
+    func contains(_ point: CGPoint) -> Bool {
+        Double(point.x) >= minX && Double(point.x) <= maxX && Double(point.y) >= minY && Double(point.y) <= maxY
+    }
+}
 
 private final class PixelBufferBox: @unchecked Sendable {
     let value: CVPixelBuffer

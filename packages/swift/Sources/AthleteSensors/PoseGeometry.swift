@@ -156,6 +156,7 @@ public struct PoseSmoother: Sendable {
     public mutating func reset() {
         previousPoints.removeAll(keepingCapacity: true)
     }
+
 }
 
 public enum PoseTrackingState: String, Codable, Equatable, Sendable {
@@ -288,6 +289,14 @@ public struct PrimarySubjectTracker: Sendable {
     public mutating func reset() {
         activeTrackID = nil
         lastCandidate = nil
+        pendingCandidate = nil
+        pendingFrames = 0
+        holdFrames = 0
+    }
+
+    public mutating func lock(candidate: PoseCandidate) {
+        activeTrackID = UUID()
+        lastCandidate = candidate
         pendingCandidate = nil
         pendingFrames = 0
         holdFrames = 0

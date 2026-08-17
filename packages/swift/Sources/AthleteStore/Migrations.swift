@@ -136,6 +136,61 @@ extension AthleteStore {
                 table.add(column: "dismissed", .boolean).notNull().defaults(to: false)
             }
         }
+        migrator.registerMigration("v6_multimodal_chat_and_food_diary") { db in
+            try db.create(table: "chat_attachments") { table in
+                table.column("id", .text).primaryKey()
+                table.column("message_id", .text).notNull().indexed()
+                    .references("chat_messages", onDelete: .cascade)
+                table.column("kind", .text).notNull()
+                table.column("local_path", .text).notNull()
+                table.column("transport_path", .text)
+                table.column("mime_type", .text).notNull()
+                table.column("width", .integer).notNull()
+                table.column("height", .integer).notNull()
+                table.column("byte_size", .integer).notNull()
+                table.column("created_at", .datetime).notNull()
+            }
+            try db.create(table: "food_entries") { table in
+                table.column("id", .text).primaryKey()
+                table.column("consumed_at", .datetime).notNull().indexed()
+                table.column("meal_type", .text).notNull()
+                table.column("notes", .text)
+                table.column("linked_chat_message_id", .text)
+                    .references("chat_messages", onDelete: .setNull)
+                table.column("created_at", .datetime).notNull()
+                table.column("updated_at", .datetime).notNull()
+            }
+            try db.create(table: "food_items") { table in
+                table.column("id", .text).primaryKey()
+                table.column("entry_id", .text).notNull().indexed()
+                    .references("food_entries", onDelete: .cascade)
+                table.column("payload", .blob).notNull()
+            }
+            try db.create(table: "food_entry_attachments") { table in
+                table.column("entry_id", .text).notNull()
+                    .references("food_entries", onDelete: .cascade)
+                table.column("attachment_id", .text).notNull()
+                    .references("chat_attachments", onDelete: .cascade)
+                table.primaryKey(["entry_id", "attachment_id"])
+            }
+            try db.create(table: "food_tool_calls") { table in
+                table.column("id", .text).primaryKey()
+                table.column("operation", .text).notNull()
+                table.column("entry_id", .text)
+                table.column("result", .blob).notNull()
+                table.column("created_at", .datetime).notNull()
+            }
+        }
+        migrator.registerMigration("v7_chat_citations") { db in
+            try db.create(table: "chat_citations") { table in
+                table.column("id", .text).primaryKey()
+                table.column("message_id", .text).notNull().indexed()
+                    .references("chat_messages", onDelete: .cascade)
+                table.column("title", .text)
+                table.column("url", .text).notNull()
+                table.column("created_at", .datetime).notNull()
+            }
+        }
         return migrator
     }
 

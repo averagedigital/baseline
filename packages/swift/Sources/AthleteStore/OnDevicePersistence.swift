@@ -60,18 +60,22 @@ extension AthleteStore {
         }
     }
 
-    public func loadPersonalizationState<State: Decodable>(as type: State.Type) throws -> State? {
+    public func loadPersonalizationState<State: Decodable>(id: String = "personalization-v1", as type: State.Type) throws -> State? {
         try database.read { db in
-            guard let data = try Data.fetchOne(db, sql: "SELECT payload FROM personalization_state WHERE id = ?", arguments: ["personalization-v1"]) else { return nil }
+            guard let data = try Data.fetchOne(db, sql: "SELECT payload FROM personalization_state WHERE id = ?", arguments: [id]) else { return nil }
             return try JSONDecoder().decode(State.self, from: data)
         }
     }
 
-    public func savePersonalizationState<State: Encodable>(_ state: State, at date: Date) throws {
+    public func savePersonalizationState<State: Encodable>(_ state: State, id: String = "personalization-v1", at date: Date) throws {
         let data = try JSONEncoder().encode(state)
         try database.write { db in
-            try db.execute(sql: "INSERT INTO personalization_state (id, payload, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at", arguments: ["personalization-v1", data, date])
+            try db.execute(sql: "INSERT INTO personalization_state (id, payload, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at", arguments: [id, data, date])
         }
+    }
+
+    public func clearPersonalizationState() throws {
+        try database.write { try $0.execute(sql: "DELETE FROM personalization_state") }
     }
 
     public func hasFeedbackEvent(id: UUID) throws -> Bool {

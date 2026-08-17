@@ -2,6 +2,21 @@ import AthleteNutrition
 import CoreML
 import Vision
 
+enum FoodLabelPolicy {
+    private static let supported = Set([
+        "banana", "apple", "sandwich", "orange", "broccoli", "carrot",
+        "hot dog", "pizza", "donut", "cake", "cup",
+    ])
+
+    static func isSupported(_ label: String) -> Bool {
+        supported.contains(label.lowercased())
+    }
+
+    static func analysisDetections(_ detections: [FoodDetection]) -> [FoodDetection] {
+        detections.filter { isSupported($0.label) }
+    }
+}
+
 struct FoodObjectDetector: @unchecked Sendable {
     enum Availability: Equatable, Sendable { case available, modelMissing, invalid }
     enum DetectorError: LocalizedError {

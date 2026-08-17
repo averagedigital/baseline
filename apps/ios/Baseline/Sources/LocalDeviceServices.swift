@@ -14,25 +14,6 @@ struct LocalFoodItem: Codable, Equatable, Sendable, Identifiable {
 }
 enum NutritionAvailability: Equatable, Sendable { case available, databaseMissing, invalid }
 
-private struct ContextResettingCoachGenerator: CoachGenerating {
-    let adapter: FoundationModelsCoachAdapter
-
-    func generate(request: CoachGenerationRequest) async throws -> CoachOutput {
-        do {
-            return try await adapter.generate(request: request)
-        } catch let error as CoachGenerationError where error == .contextWindowExceeded {
-            await adapter.reset(threadID: request.threadID ?? UUID())
-            let compact = CoachGenerationRequest(
-                prompt: request.prompt,
-                facts: request.facts,
-                conversation: Array(request.conversation.suffix(8)),
-                threadID: request.threadID
-            )
-            return try await adapter.generate(request: compact)
-        }
-    }
-}
-
 private actor SerialMutationQueue {
     private var tail: Task<Void, Never>?
 
@@ -77,15 +58,10 @@ struct LocalHome: Codable, Equatable, Sendable {
 }
 struct LocalFeedbackPayload: Codable, Sendable { let sourceEvidenceID: UUID; let rpe: Double; let note: String }
 struct LocalRecommendationRewardPayload: Codable, Sendable { let exposureID: UUID; let reward: Double }
-enum LocalCoachError: LocalizedError { case unavailable, unsupportedLocale, contextWindowExceeded, refused, invalidResponse, failed
-    var errorDescription: String? { switch self { case .unavailable: "Локальная языковая модель недоступна на этом устройстве."; case .unsupportedLocale: "Язык запроса не поддерживается локальной моделью."; case .contextWindowExceeded: "Контекст Coach слишком большой."; case .refused: "Локальная модель не смогла ответить на этот запрос."; case .invalidResponse: "Не удалось подтвердить ответ данными тренировки."; case .failed: "Не удалось получить ответ Coach." } }
-}
-
 actor LocalDeviceServices {
     private let store: AthleteStore?
     private var nutritionDatabase: NutritionDatabase?
     private var nutritionAvailabilityState: NutritionAvailability?
-    private let coachGenerator = FoundationModelsCoachAdapter()
     private let personalizationMutations = SerialMutationQueue()
 
     init(store: AthleteStore? = nil) {
@@ -155,6 +131,48 @@ actor LocalDeviceServices {
     func deleteChat(id: UUID) async throws {
         guard let store else { throw LocalStorageError.unavailable }
         try await store.deleteChat(id: id)
+    }
+
+    func loadContinualPersonalization() async throws -> ContinualPersonalizationState {
+        guard let store else { throw LocalStorageError.unavailable }
+        return try await store.loadPersonalizationState(id: "continual-personalization-v1", as: ContinualPersonalizationState.self) ?? .init()
+    }
+
+    func saveContinualPersonalization(_ state: ContinualPersonalizationState) async throws {
+        guard let store else { throw LocalStorageError.unavailable }
+        try await store.savePersonalizationState(state, id: "continual-personalization-v1", at: Date())
+    }
+
+    func updateIdentityGallery(embedding: [Double], quality: Double) async throws {
+        guard let store else { throw LocalStorageError.unavailable }
+        var state = try await store.loadPersonalizationState(id: "continual-personalization-v1", as: ContinualPersonalizationState.self) ?? .init()
+        guard state.identity.update(embedding: embedding, quality: quality, isAmbiguous: false) else { return }
+        try await store.savePersonalizationState(state, id: "continual-personalization-v1", at: Date())
+    }
+
+    func resetPersonalization() async throws {
+        guard let store else { throw LocalStorageError.unavailable }
+        try await store.clearPersonalizationState()
+    }
+
+    func foodEntries(from: Date, to: Date) async throws -> [FoodEntry] {
+        guard let store else { throw LocalStorageError.unavailable }
+        return try await store.foodEntries(from: from, to: to)
+    }
+
+    func updateFoodEntry(id: UUID, patch: FoodEntryPatch) async throws -> FoodEntry {
+        guard let store else { throw LocalStorageError.unavailable }
+        return try await store.updateFoodEntry(id: id, patch: patch, toolCallID: "ui-update-\(UUID().uuidString)")
+    }
+
+    func deleteFoodEntry(id: UUID) async throws {
+        guard let store else { throw LocalStorageError.unavailable }
+        _ = try await store.deleteFoodEntry(id: id, toolCallID: "ui-delete-\(UUID().uuidString)")
+    }
+
+    func chatThread(containingMessageID messageID: UUID) async throws -> ChatThread? {
+        guard let store else { throw LocalStorageError.unavailable }
+        return try await store.chatThread(containingMessageID: messageID)
     }
 
     func providerConfigurations() async throws -> [ProviderConfiguration] {
@@ -234,75 +252,40 @@ actor LocalDeviceServices {
         }
     }
 
-    func chat(threadID: UUID?, message: String) async throws -> LocalChatResponse {
-        guard let store else { throw LocalStorageError.unavailable }
-        guard case .available = coachGenerator.availability else { throw LocalCoachError.unavailable }
-        let thread: UUID
-        if let threadID {
-            guard try await store.chatThreads().contains(where: { $0.id == threadID }) else { throw AthleteStoreError.invalidIdentifier(threadID.uuidString) }
-            thread = threadID
-        } else {
-            thread = try await store.createChat(title: String(message.prefix(48))).id
-        }
-        try await store.appendChatMessage(ChatHistoryMessage(threadID: thread, role: .user, text: message))
-        let facts = try await coachFacts(store: store)
-        let history = try await store.chatMessages(threadID: thread).suffix(12).dropLast().map { CoachConversationTurn(role: $0.role == .user ? .user : .assistant, text: $0.text) }
-        let request = CoachGenerationRequest(prompt: message, facts: facts, conversation: Array(history), threadID: thread)
-        let generator = ContextResettingCoachGenerator(adapter: coachGenerator)
-        let output: CoachOutput
-        do { output = try await CoachOrchestrator(generator: generator).generate(request: request) }
-        catch is GroundingError { throw LocalCoachError.invalidResponse }
-        catch { throw mapCoachError(error) }
-        let answer = output.claims.map(\.text).joined(separator: "\n\n")
-        try await store.appendChatMessage(ChatHistoryMessage(threadID: thread, role: .assistant, text: answer))
-        let action = output.recommendationAction.flatMap(CoachingAction.init(rawValue:))
-        var exposureID: UUID?
-        if let action, let session = try await store.latestEvidence(kind: "activity.session.v2") {
-            let features = try await PersonalizationFeatureBuilder(store: store).features(for: session.id)
-            let exposure = RecommendationExposure(action: action, features: features, contextDigest: session.contentDigest)
-            try await store.saveRecommendationExposure(StoredRecommendationExposure(id: exposure.id, payload: JSONEncoder().encode(exposure), createdAt: exposure.createdAt))
-            exposureID = exposure.id
-        }
-        return LocalChatResponse(threadID: thread, answerMarkdown: answer, recommendationCategory: action?.rawValue ?? "none", evidenceIDs: Array(Set(facts.compactMap { $0.sourceEvidenceID })), foodIDs: Array(Set(facts.compactMap { $0.sourceFoodObservationID })), contextDigest: "local", feedbackContextID: exposureID)
-    }
-
-    private func mapCoachError(_ error: Error) -> LocalCoachError {
-        switch error {
-        case let error as LocalCoachError: return error
-        case CoachGenerationError.unsupportedLocale: return .unsupportedLocale
-        case CoachGenerationError.contextWindowExceeded: return .contextWindowExceeded
-        case CoachGenerationError.refused: return .refused
-        case CoachGenerationError.unavailable: return .unavailable
-        default: return .failed
-        }
-    }
-
     private func coachFacts(store: AthleteStore) async throws -> [GroundedFact] {
-        guard let envelope = try await store.latestEvidence(kind: "activity.session.v2"), let session = try await store.payload(for: envelope.id, as: SessionEvidenceV2.self) else { return [] }
-        var facts: [GroundedFact] = [
-            .text("session:\(envelope.id.uuidString):observed_from", ISO8601DateFormatter().string(from: session.observedFrom), sourceEvidenceID: envelope.id),
-            .text("session:\(envelope.id.uuidString):observed_to", ISO8601DateFormatter().string(from: session.observedTo), sourceEvidenceID: envelope.id),
-            .number("session:\(envelope.id.uuidString):duration_minutes", session.observedTo.timeIntervalSince(session.observedFrom) / 60, sourceEvidenceID: envelope.id),
-            .number("session:\(envelope.id.uuidString):active_minutes", session.activeTime / 60, sourceEvidenceID: envelope.id),
-            .number("session:\(envelope.id.uuidString):rest_minutes", session.restTime / 60, sourceEvidenceID: envelope.id),
-            .number("session:\(envelope.id.uuidString):tracking_gap_minutes", session.trackingGapTime / 60, sourceEvidenceID: envelope.id),
-            .number("session:\(envelope.id.uuidString):active_block_count", Double(session.activeBlockCount), sourceEvidenceID: envelope.id),
-            .number("session:\(envelope.id.uuidString):tracking_coverage", session.trackingCoverage, sourceEvidenceID: envelope.id),
-            .text("session:\(envelope.id.uuidString):algorithm_version", session.algorithmVersion, sourceEvidenceID: envelope.id),
-            .number("session:\(envelope.id.uuidString):capture:ambiguous_frame_count", Double(session.captureQuality.ambiguousFrameCount), sourceEvidenceID: envelope.id),
-            .number("session:\(envelope.id.uuidString):capture:identity_discontinuity_count", Double(session.captureQuality.identityDiscontinuityCount), sourceEvidenceID: envelope.id),
-            .number("session:\(envelope.id.uuidString):capture:warmup_frame_count", Double(session.captureQuality.warmupFrameCount), sourceEvidenceID: envelope.id),
-            .number("session:\(envelope.id.uuidString):capture:rejected_motion_frame_count", Double(session.captureQuality.rejectedMotionFrameCount), sourceEvidenceID: envelope.id),
-            .number("session:\(envelope.id.uuidString):capture:tracking_gap_count", Double(session.captureQuality.trackingGapCount), sourceEvidenceID: envelope.id),
-            .text("session:\(envelope.id.uuidString):timeline", session.segments.prefix(80).map { "\($0.state.rawValue) \($0.startOffset)-\($0.endOffset)" }.joined(separator: "; "), sourceEvidenceID: envelope.id),
-        ]
-        for recent in try await store.evidenceEnvelopes(kind: "activity.session.v2", limit: 5) {
-            guard recent.id != envelope.id, let value = try await store.payload(for: recent.id, as: SessionEvidenceV2.self) else { continue }
+        let sessionEnvelopes = try await store.evidenceEnvelopes(kind: "activity.session.v2", limit: 5)
+        var compatibleSessions: [(EvidenceEnvelope, SessionEvidenceV2)] = []
+        for envelope in sessionEnvelopes {
+            if let session = try? await store.payload(for: envelope.id, as: SessionEvidenceV2.self) {
+                compatibleSessions.append((envelope, session))
+            }
+        }
+        var facts: [GroundedFact] = []
+        if let (envelope, session) = compatibleSessions.first {
+            facts += [
+                .text("session:\(envelope.id.uuidString):observed_from", ISO8601DateFormatter().string(from: session.observedFrom), sourceEvidenceID: envelope.id),
+                .text("session:\(envelope.id.uuidString):observed_to", ISO8601DateFormatter().string(from: session.observedTo), sourceEvidenceID: envelope.id),
+                .number("session:\(envelope.id.uuidString):duration_minutes", session.observedTo.timeIntervalSince(session.observedFrom) / 60, sourceEvidenceID: envelope.id),
+                .number("session:\(envelope.id.uuidString):active_minutes", session.activeTime / 60, sourceEvidenceID: envelope.id),
+                .number("session:\(envelope.id.uuidString):rest_minutes", session.restTime / 60, sourceEvidenceID: envelope.id),
+                .number("session:\(envelope.id.uuidString):tracking_gap_minutes", session.trackingGapTime / 60, sourceEvidenceID: envelope.id),
+                .number("session:\(envelope.id.uuidString):active_block_count", Double(session.activeBlockCount), sourceEvidenceID: envelope.id),
+                .number("session:\(envelope.id.uuidString):tracking_coverage", session.trackingCoverage, sourceEvidenceID: envelope.id),
+                .text("session:\(envelope.id.uuidString):algorithm_version", session.algorithmVersion, sourceEvidenceID: envelope.id),
+                .number("session:\(envelope.id.uuidString):capture:ambiguous_frame_count", Double(session.captureQuality.ambiguousFrameCount), sourceEvidenceID: envelope.id),
+                .number("session:\(envelope.id.uuidString):capture:identity_discontinuity_count", Double(session.captureQuality.identityDiscontinuityCount), sourceEvidenceID: envelope.id),
+                .number("session:\(envelope.id.uuidString):capture:warmup_frame_count", Double(session.captureQuality.warmupFrameCount), sourceEvidenceID: envelope.id),
+                .number("session:\(envelope.id.uuidString):capture:rejected_motion_frame_count", Double(session.captureQuality.rejectedMotionFrameCount), sourceEvidenceID: envelope.id),
+                .number("session:\(envelope.id.uuidString):capture:tracking_gap_count", Double(session.captureQuality.trackingGapCount), sourceEvidenceID: envelope.id),
+                .text("session:\(envelope.id.uuidString):timeline", session.segments.prefix(80).map { "\($0.state.rawValue) \($0.startOffset)-\($0.endOffset)" }.joined(separator: "; "), sourceEvidenceID: envelope.id),
+            ]
+        }
+        for (recent, value) in compatibleSessions.dropFirst() {
             let prefix = "recent_session:\(recent.id.uuidString)"
             facts += [.text("\(prefix):date", ISO8601DateFormatter().string(from: value.observedTo), sourceEvidenceID: recent.id), .number("\(prefix):active_minutes", value.activeTime / 60, sourceEvidenceID: recent.id), .number("\(prefix):rest_minutes", value.restTime / 60, sourceEvidenceID: recent.id), .number("\(prefix):active_blocks", Double(value.activeBlockCount), sourceEvidenceID: recent.id), .number("\(prefix):coverage", value.trackingCoverage, sourceEvidenceID: recent.id)]
         }
         for narrative in try await store.evidenceEnvelopes(kind: "user.narrative.v1", limit: 10) {
-            guard let source = narrative.derivedFrom.first, let rpe = try await store.payload(for: narrative.id, as: SessionRPEEvidence.self) else { continue }
+            guard let source = narrative.derivedFrom.first, let rpe = try? await store.payload(for: narrative.id, as: SessionRPEEvidence.self) else { continue }
             facts += [.number("session:\(source.uuidString):rpe", rpe.rpe, sourceEvidenceID: source), .text("session:\(source.uuidString):rpe_note", rpe.note ?? "", sourceEvidenceID: source)]
         }
         for observation in try await store.recentFoodObservations(limit: 5) where !observation.dismissed {
@@ -310,6 +293,7 @@ actor LocalDeviceServices {
             facts.append(.text("food:\(food.id.uuidString):names", food.items.map { $0.name }.joined(separator: ", "), sourceFoodObservationID: food.id))
             facts.append(.text("food:\(food.id.uuidString):label_confidence", food.items.map { String(format: "%.2f", $0.labelConfidence) }.joined(separator: ", "), sourceFoodObservationID: food.id))
             facts.append(.boolean("food:\(food.id.uuidString):portion_available", food.items.contains { $0.estimatedGrams != nil || ($0.gramsLow != nil && $0.gramsHigh != nil) }, sourceFoodObservationID: food.id))
+            facts.append(.text("food:\(food.id.uuidString):kcal_per_100g", food.items.map { item in item.kcalPer100g.map { "\(item.name): \($0)" } ?? "\(item.name): unknown" }.joined(separator: ", "), sourceFoodObservationID: food.id))
             if let low = food.caloriesLow, let high = food.caloriesHigh { facts += [.number("food:\(food.id.uuidString):kcal_low", low, sourceFoodObservationID: food.id), .number("food:\(food.id.uuidString):kcal_high", high, sourceFoodObservationID: food.id)] }
         }
         let state: PersonalizationState
@@ -320,12 +304,13 @@ actor LocalDeviceServices {
             state = PersonalizationState()
         }
         facts += [.number("personalization:difficulty_sample_count", Double(state.difficulty.samples)), .number("personalization:difficulty_confidence", state.difficulty.dataConfidence), .number("personalization:explicit_reward_count", Double(state.bandit.totalExplicitRewards)), .boolean("personalization:recommendation_personalized", state.bandit.totalExplicitRewards >= 5)]
-        if let features = try? await PersonalizationFeatureBuilder(store: store).features(for: envelope.id),
+        if let envelope = compatibleSessions.first?.0,
+           let features = try? await PersonalizationFeatureBuilder(store: store).features(for: envelope.id),
            let prediction = state.difficulty.predict(features: features) {
             facts.append(.number("personalization:predicted_difficulty", prediction))
         }
-        assert(Set(facts.map(\.id)).count == facts.count)
-        return facts
+        var seen = Set<String>()
+        return facts.filter { seen.insert($0.id).inserted }
     }
 
     func sendSessionRPE(eventID: UUID, value: Double, sourceEvidenceID: UUID, note: String) async throws -> LocalFeedbackResponse {
@@ -364,7 +349,59 @@ actor LocalDeviceServices {
         return LocalFeedbackResponse(stored: stored, personalizationSamples: state.bandit.totalExplicitRewards)
     }
     func dismissFood(observationID: UUID) async throws { guard let store else { throw LocalStorageError.unavailable }; try await store.dismissFoodObservation(id: observationID) }
+
+    func executeFoodTool(_ call: CoachToolCall, linkedChatMessageID: UUID?, linkedAttachmentIDs: [UUID]) async -> String {
+        guard let store else { return #"{"success":false,"error":"storage_unavailable"}"# }
+        do {
+            let data = Data(call.arguments.utf8)
+            switch call.name {
+            case "create_food_entry":
+                let value = try JSONDecoder.baselineTool.decode(CreateFoodToolArguments.self, from: data)
+                let entry = try await store.createFoodEntry(value.draft(linkedChatMessageID: linkedChatMessageID, linkedAttachmentIDs: linkedAttachmentIDs), toolCallID: call.callID)
+                return try JSONEncoder.baselineTool.encodeString([entry])
+            case "update_food_entry":
+                let value = try JSONDecoder.baselineTool.decode(UpdateFoodToolArguments.self, from: data)
+                guard let id = UUID(uuidString: value.id) else { throw FoodDiaryError.invalidInput }
+                let entry = try await store.updateFoodEntry(id: id, patch: .init(consumedAt: value.consumedAt, mealType: value.mealType, items: value.items?.map(\.draft), notes: value.notes), toolCallID: call.callID)
+                return try JSONEncoder.baselineTool.encodeString([entry])
+            case "delete_food_entry":
+                let value = try JSONDecoder().decode(IDToolArguments.self, from: data)
+                guard let id = UUID(uuidString: value.id) else { throw FoodDiaryError.invalidInput }
+                _ = try await store.deleteFoodEntry(id: id, toolCallID: call.callID)
+                return #"{"success":true}"#
+            case "get_food_entry":
+                let value = try JSONDecoder().decode(IDToolArguments.self, from: data)
+                guard let id = UUID(uuidString: value.id) else { throw FoodDiaryError.invalidInput }
+                return try JSONEncoder.baselineTool.encodeString(try await store.foodEntry(id: id).map { [$0] } ?? [])
+            case "list_food_entries":
+                let value = try JSONDecoder.baselineTool.decode(ListFoodToolArguments.self, from: data)
+                return try JSONEncoder.baselineTool.encodeString(try await store.foodEntries(from: value.from, to: value.to))
+            default: return #"{"success":false,"error":"tool_not_allowed"}"#
+            }
+        } catch {
+            return #"{"success":false,"error":"invalid_or_failed_tool_call"}"#
+        }
+    }
 }
+
+private struct FoodValueTool: Codable { let exact: Double?; let low: Double?; let high: Double?; var value: EstimatedValue { if let exact { .exact(exact) } else if let low, let high { .range(low: low, high: high) } else { .unknown } } }
+private struct FoodItemTool: Codable {
+    let name: String; let amount: FoodValueTool; let unit: String?; let caloriesKcal: FoodValueTool
+    let proteinG: FoodValueTool; let fatG: FoodValueTool; let carbohydratesG: FoodValueTool
+    let provenance: FoodProvenance; let confidence: Double?; let sourceURL: URL?
+    var draft: FoodItemDraft { .init(name: name, amount: amount.value, unit: unit, caloriesKcal: caloriesKcal.value, proteinG: proteinG.value, fatG: fatG.value, carbohydratesG: carbohydratesG.value, provenance: provenance, confidence: confidence, sourceURL: sourceURL) }
+}
+private struct CreateFoodToolArguments: Codable {
+    let consumedAt: Date; let mealType: MealType; let items: [FoodItemTool]; let notes: String?
+    func draft(linkedChatMessageID: UUID?, linkedAttachmentIDs: [UUID]) -> FoodEntryDraft {
+        .init(consumedAt: consumedAt, mealType: mealType, items: items.map(\.draft), notes: notes, linkedChatMessageID: linkedChatMessageID, linkedAttachmentIDs: linkedAttachmentIDs)
+    }
+}
+private struct UpdateFoodToolArguments: Codable { let id: String; let consumedAt: Date?; let mealType: MealType?; let items: [FoodItemTool]?; let notes: String? }
+private struct IDToolArguments: Codable { let id: String }
+private struct ListFoodToolArguments: Codable { let from: Date; let to: Date }
+private extension JSONDecoder { static var baselineTool: JSONDecoder { let value = JSONDecoder(); value.dateDecodingStrategy = .iso8601; value.keyDecodingStrategy = .convertFromSnakeCase; return value } }
+private extension JSONEncoder { static var baselineTool: JSONEncoder { let value = JSONEncoder(); value.dateEncodingStrategy = .iso8601; value.keyEncodingStrategy = .convertToSnakeCase; return value }; func encodeString<T: Encodable>(_ value: T) throws -> String { String(decoding: try encode(value), as: UTF8.self) } }
 
 enum LocalStorageError: LocalizedError { case unavailable; case duplicate; case invalidExposure; var errorDescription: String? { switch self { case .unavailable: "Локальное хранилище недоступно."; case .duplicate: "Оценка этого совета уже сохранена."; case .invalidExposure: "Некорректный snapshot рекомендации." } } }
 enum FoodDetectorUnavailableError: LocalizedError {

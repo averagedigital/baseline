@@ -35,6 +35,18 @@ private func candidate(
 }
 
 final class AthleteSensorsTests: XCTestCase {
+func testExplicitLockSelectsUserWithoutAcquisitionDelay() {
+    var tracker = PrimarySubjectTracker(configuration: .init(acquisitionFrames: 5))
+    let selected = candidate(centerX: 0.75)
+    tracker.lock(candidate: selected)
+
+    let result = tracker.update(candidates: [candidate(centerX: 0.25), selected])
+
+    XCTAssertNotNil(result.trackID)
+    XCTAssertEqual(result.candidate?.boundingBox.center.x, selected.boundingBox.center.x)
+    XCTAssertTrue(result.isMetricEligible)
+}
+
 func testKeepsIdentityWhenVisionOrderingChanges() {
     var tracker = PrimarySubjectTracker(configuration: .init(acquisitionFrames: 2))
     let user0 = candidate(centerX: 0.48)

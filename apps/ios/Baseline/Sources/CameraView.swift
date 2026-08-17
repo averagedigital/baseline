@@ -79,6 +79,7 @@ final class CameraModel {
     var nutritionAvailability: NutritionAvailability = .databaseMissing
     var foodObjects: [TrackedFoodObject] = []
     var foodSourceSize: CGSize = .zero
+    var foodDetailsByLabel: [String: LocalFoodItem] = [:]
     var latestFood: LocalFoodAnalysis?
     var localHome: LocalHome?
     var lastSession: SessionSummaryViewData?
@@ -141,6 +142,12 @@ final class CameraModel {
                 guard let self else { return }
                 self.foodDetectorAvailability = availability
                 if availability != .available { self.foodPhase = .unavailable }
+            }
+        }
+        pipeline.onIdentitySample = { [weak self] values, quality in
+            Task {
+                do { try await self?.localServices.updateIdentityGallery(embedding: values, quality: quality) }
+                catch { await MainActor.run { self?.errorMessage = "Не удалось сохранить персональный identity prototype." } }
             }
         }
         pipeline.onError = { [weak self] message in
@@ -232,6 +239,11 @@ final class CameraModel {
         resetRealtimeMetrics()
     }
 
+    func lockSubject(at point: CGPoint) {
+        pipeline.lockSubject(at: point)
+        resetRealtimeMetrics()
+    }
+
     func setFoodScanEnabled(_ enabled: Bool) {
         foodScanEnabled = enabled
         pipeline.setFoodScanEnabled(enabled)
@@ -240,6 +252,7 @@ final class CameraModel {
         } else {
             latestFood = nil
             foodObjects = []
+            foodDetailsByLabel = [:]
         }
     }
 
@@ -429,6 +442,11 @@ final class CameraModel {
         do {
             let result = try await localServices.analyzeFood(detections: detections, capturedAt: capturedAt)
             if result.containsFood {
+                var details: [String: LocalFoodItem] = [:]
+                for (detection, item) in zip(detections, result.items) {
+                    details[detection.label] = item
+                }
+                foodDetailsByLabel = details
                 latestFood = result
                 foodPhase = .watching
                 await refreshHome()
@@ -471,286 +489,6 @@ private extension ActivitySegmentationConfiguration {
     )
 }
 
-struct CameraCard: View {
-    let model: CameraModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                CameraPreview(
-                    session: model.pipeline.session,
-                    isMirrored: model.cameraPosition == .front
-                )
-                PoseOverlay(
-                    samples: model.samples,
-                    boundingBox: model.boundingBox,
-                    state: model.trackingState
-                )
-                FoodDetectionOverlay(objects: model.foodObjects, sourceSize: model.foodSourceSize, isMirrored: model.cameraPosition == .front)
-
-                VStack {
-                    HStack {
-                        TrackingStatusPill(
-                            label: model.trackingLabel,
-                            tone: model.trackingTone,
-                            pulses: model.trackingState == .stable && model.isCameraRunning
-                        )
-                        Spacer()
-                        cameraControls
-                    }
-                    Spacer()
-                    if model.trackingState == .multiplePeople
-                        || model.metricExclusionReason == .identityDiscontinuity {
-                        Button("Зафиксировать меня заново") {
-                            model.resetSubjectLock()
-                        }
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(BaselineTheme.ink)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.94), in: Capsule())
-                        .transition(.opacity)
-                    }
-                }
-                .padding(12)
-            }
-            .aspectRatio(4 / 3, contentMode: .fit)
-            .frame(maxHeight: 380)
-            .background(Color.black)
-            .clipShape(UnevenRoundedRectangle(
-                topLeadingRadius: 20,
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: 0,
-                topTrailingRadius: 20,
-                style: .continuous
-            ))
-
-            liveDock
-                .padding(16)
-        }
-        .baselineCard(radius: 20)
-        .animation(reduceMotion ? nil : BaselineTheme.standardAnimation, value: model.trackingState)
-    }
-
-    private var cameraControls: some View {
-        HStack(spacing: 8) {
-            Button {
-                Task { await model.switchCamera() }
-            } label: {
-                Image(systemName: "camera.rotate")
-                    .frame(width: 38, height: 38)
-                    .background(Color.white.opacity(0.94), in: Circle())
-            }
-            .foregroundStyle(BaselineTheme.ink)
-            .accessibilityLabel("Переключить камеру")
-        }
-    }
-
-    private var liveDock: some View {
-        VStack(spacing: 14) {
-            HStack(alignment: .center, spacing: 14) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Интенсивность")
-                        .font(.caption)
-                        .foregroundStyle(BaselineTheme.secondary)
-                    Text(model.currentMetrics.isValid
-                        ? String(format: "%.0f%%", model.currentMetrics.intensity * 100)
-                        : "—")
-                        .font(.system(size: 25, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                }
-                MotionIntensityChart(history: model.intensityHistory)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text("Активные блоки")
-                        .font(.caption)
-                        .foregroundStyle(BaselineTheme.secondary)
-                    Text("\(model.liveSetCount)")
-                        .font(.system(size: 25, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                }
-            }
-
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(BaselineTheme.success)
-                    .frame(width: 8, height: 8)
-                Text(model.isWorkoutRecording
-                    ? "Запись · \(duration(model.recordingElapsed))"
-                    : "Подготовка записи")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(BaselineTheme.secondary)
-                Spacer()
-            }
-        }
-    }
-
-    private func duration(_ seconds: TimeInterval) -> String {
-        let total = max(Int(seconds), 0)
-        return String(format: "%02d:%02d", total / 60, total % 60)
-    }
-}
-
-struct LatestFoodCard: View {
-    let model: CameraModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("Питание", systemImage: "fork.knife")
-                    .font(.system(size: 17, weight: .semibold))
-                Spacer()
-                if model.foodPhase == .analyzing {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Text(model.foodScanEnabled ? "Авто" : "Выкл.")
-                        .font(.caption)
-                        .foregroundStyle(BaselineTheme.secondary)
-                }
-            }
-
-            if let calories = model.latestFoodCalories {
-                Text(model.latestFoodTitle)
-                    .font(.system(size: 16, weight: .medium))
-                    .lineLimit(2)
-                HStack(alignment: .firstTextBaseline) {
-                    Text(calories)
-                        .font(.system(size: 24, weight: .semibold, design: .rounded))
-                    Spacer()
-                    Button("Не еда") {
-                        Task { await model.dismissLatestFood() }
-                    }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(BaselineTheme.danger)
-                }
-                Text("Размер порции не оценён. Для калорий нужно уточнить граммы.")
-                    .font(.caption)
-                    .foregroundStyle(BaselineTheme.secondary)
-            } else {
-                Text(model.latestFoodTitle)
-                    .font(.system(size: 15, weight: .medium))
-                if !model.foodObjects.isEmpty {
-                    Text(model.nutritionAvailability == .available
-                        ? "Для калорий нужно уточнить размер порции."
-                        : "База питания не подключена.")
-                        .font(.caption)
-                        .foregroundStyle(BaselineTheme.secondary)
-                }
-                Text("Изображения камеры обрабатываются в памяти и не сохраняются.")
-                    .font(.caption)
-                    .foregroundStyle(BaselineTheme.secondary)
-            }
-        }
-        .padding(18)
-        .baselineCard()
-    }
-}
-
-struct HomeInsightCard: View {
-    let model: CameraModel
-    let openCoach: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("Сейчас")
-                    .font(.system(size: 17, weight: .semibold))
-                Spacer()
-                if let confidence = model.localHome?.recommendationConfidence, model.localHome?.recommendationIsPersonalized == true, confidence > 0 {
-                    Text("персонализация \(Int((confidence * 100).rounded()))%")
-                        .font(.caption)
-                        .foregroundStyle(BaselineTheme.secondary)
-                }
-            }
-
-            Text(insightTitle)
-                .font(.system(size: 23, weight: .semibold, design: .rounded))
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let session = model.lastSession {
-                Text("Последняя тренировка: \(session.setCount) активных блоков, \(Int(session.activeMinutes.rounded())) мин активности, покрытие \(Int((session.trackingCoverage * 100).rounded()))%.")
-                    .font(.subheadline)
-                    .foregroundStyle(BaselineTheme.secondary)
-            } else {
-                Text("После первой сохранённой тренировки здесь появится один приоритетный вывод.")
-                    .font(.subheadline)
-                    .foregroundStyle(BaselineTheme.secondary)
-            }
-
-            Button("Открыть Coach") {
-                openCoach()
-            }
-            .buttonStyle(BaselineSecondaryButtonStyle())
-        }
-        .padding(18)
-        .baselineCard()
-    }
-
-    private var insightTitle: String {
-        switch model.localHome?.suggestedAction {
-        case "technique": "Сфокусироваться на технике"
-        case "load": "Сверить рабочую нагрузку"
-        case "recovery": "Проверить восстановление"
-        case "nutrition": "Уточнить питание вокруг тренировки"
-        case "consistency": "Сохранить ритм тренировок"
-        default: "Собрать первую надёжную базовую линию"
-        }
-    }
-}
-
-#Preview("Camera idle") {
-    CameraCard(model: CameraModel(store: nil, localServices: LocalDeviceServices(store: nil)))
-        .padding()
-}
-
-#Preview("Food idle") {
-    LatestFoodCard(model: CameraModel(store: nil, localServices: LocalDeviceServices(store: nil)))
-        .padding()
-}
-
-private struct TrackingStatusPill: View {
-    let label: String
-    let tone: Color
-    let pulses: Bool
-    @State private var highlighted = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(tone)
-                .frame(width: 7, height: 7)
-                .opacity(pulses && highlighted ? 0.45 : 1)
-            Text(label)
-                .font(.system(size: 12, weight: .semibold))
-                .lineLimit(1)
-        }
-        .foregroundStyle(BaselineTheme.ink)
-        .padding(.horizontal, 11)
-        .padding(.vertical, 9)
-        .background(Color.white.opacity(0.94), in: Capsule())
-        .onAppear {
-            guard pulses, !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
-                highlighted = true
-            }
-        }
-        .onChange(of: pulses) { _, value in
-            highlighted = false
-            guard value, !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
-                highlighted = true
-            }
-        }
-        .onChange(of: reduceMotion) { _, value in
-            if value { highlighted = false }
-        }
-    }
-}
-
 struct MotionIntensityChart: View {
     let history: MotionIntensityHistory
 
@@ -768,7 +506,7 @@ struct MotionIntensityChart: View {
                     continue
                 }
                 let x = CGFloat((point.timestamp - firstTime) / span) * size.width
-                let y = size.height * (1 - CGFloat(value))
+                let y = MotionIntensityChartGeometry.y(for: value, height: size.height)
                 if hasOpenSegment {
                     path.addLine(to: CGPoint(x: x, y: y))
                 } else {
@@ -779,6 +517,13 @@ struct MotionIntensityChart: View {
             context.stroke(path, with: .color(BaselineTheme.accent), lineWidth: 2)
         }
         .accessibilityLabel("Интенсивность за последние двенадцать секунд")
+    }
+}
+
+enum MotionIntensityChartGeometry {
+    static func y(for value: Double, height: CGFloat) -> CGFloat {
+        guard height > 1 else { return 0 }
+        return min(max(height * (1 - CGFloat(value)), 1), height - 1)
     }
 }
 
